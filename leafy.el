@@ -54,6 +54,43 @@
   (let ((cmd (concat "import tiktoken; enc = tiktoken.get_encoding('gpt2'); print(len(enc.encode('" (python-quote-argument string) "')));\n")))
     (string-to-number (eval-python-integer cmd))))
 
+(defun leafy-get-sections ()
+  "Extracts each section in the buffer as a (tag, title, content) triplet."
+  (let ((sections '()))
+    (org-element-map (org-element-parse-buffer) 'section
+      (lambda (section)
+        (let* ((headline (org-element-property :parent section))
+               (title (org-element-property :title headline))
+               (content-start (org-element-property :contents-begin section))
+               (content-end (org-element-property :contents-end section))
+	       (excluded-tags (append '("PROPERTIES") nil));org-element-exclude-tags))
+	       (paragraphs (org-element-map section 'paragraph 'identity))
+	       (content (apply 'concat
+			 (mapcar
+			  (lambda (paragraph)
+			    (org-no-properties
+			     (org-element-interpret-data paragraph)))
+			  paragraphs)))
+	       ;;(section-remove-properties (progn (org-element-map section '(property-drawer)
+	       ;;				   (lambda (drawer) (org-element-extract-element drawer)))
+	       ;;				 (buffer-substring-no-properties
+	       ;;				  (org-element-property :contents-begin section)
+	       ;;				  (org-element-property :contents-end section))))
+               ;;(without-properties (org-element-interpret-data (org-element-contents section)))
+	       ;;(without-properties (org-element-extract-element section '("PROPERTIES")))
+               ;;(content (buffer-substring-no-properties content-start content-end))
+	       ;;(content-with-properties (org-element-interpret-data
+		;;			 (org-element-extract-element
+		;;			  section)))
+	       ;;(content (org-element-normalize-string content-with-properties))
+               (tag (if (member "assistant" (org-element-property :tags headline))
+                        "assistant"
+                      (if (member "system" (org-element-property :tags headline))
+                          "system"
+                        "user")))
+	       )
+          (push (list tag (format "%s\n%s" title content)) sections))))
+    (reverse sections)))
 ;; (delete-non-digits "aouaoueo5aoeuaoeuaoeu")
 
 ;; (python-shell-send-setup-code)
@@ -70,15 +107,21 @@
 
 ;; (comint-send-string (get-buffer-process "*Python*") "print(2+2)\n" :noecho)
 
-(shell-quote-argument "This is a test.")
+;;(shell-quote-argument "This is a test.")
 
-(let ((process-name "Python"))
-  (when (get-process process-name)
-    (delete-process (get-process process-name))))
+;;(let ((process-name "Python"))
+;;  (when (get-process process-name)
+;;    (delete-process (get-process process-name))))
 
 (defvar chatgpt-buffer
   (get-buffer-create "*ChatGPT*")
   "The buffer to log messages from the `do-chatgpt-request` function.")
+
+(defun leafy-validate-chatgpt-response (response)
+  (when (eq (caar response) 'error)
+      (user-error "ChatGPT API Error: %S" (alist-get 'message (car response)))))
+      
+  
 
 (defun leafy-do-chatgpt-request (chatgpt-buffer nodes)
   "Send the given list of nodes to the OpenAI Chat API and return a list of completions.
@@ -107,6 +150,7 @@ Messages are logged to the `chatgpt-buffer`."
         ;; Write the response to the chatgpt-buffer	
 	(princ (format "Request: %S\n" payload) chatgpt-buffer)
 	(princ (format "Response: %S\n" result) chatgpt-buffer)
+	(princ (format "Foo: %S\n" (caar result)) chatgpt-buffer)
 	result))))
 
 (defun extract-chatgpt-response-message (response)
@@ -200,12 +244,14 @@ Messages are logged to the `chatgpt-buffer`."
 
 (defun leafy-get-context-at-element (element)
   "Return a list of all headings and their titles up to the top-level heading, along with their paragraphs."
-  (let* ((whole-buffer-text (buffer-substring-no-properties 1 (point-max)))
+  (let* (;; (whole-buffer-text (buffer-substring-no-properties 1 (point-max)))
+	 (all-sections (leafy-get-sections))
 	 (cursor-section (leafy-get-section-for-element element))
 	 (cursor-section-text (buffer-substring-no-properties (org-element-property :begin cursor-section)
 							      (org-element-property :end cursor-section)))
 	 )
-    `(("user" ,whole-buffer-text)
+    `(,@all-sections
+      ;; ("user" ,whole-buffer-text)
       ("user" ,cursor-section-text))))
 
 (defun leafy-insert-chatgpt-response-after (title response)
@@ -258,8 +304,9 @@ Messages are logged to the `chatgpt-buffer`."
   "Send the current node and main text of every node up to the top-level to ChatGPT for completion."
   (interactive)
   (let* ((context (leafy-get-context))
-	 (response (do-chatgpt-request chatgpt-buffer context))
+	 (response (leafy-do-chatgpt-request chatgpt-buffer context))
 	 )
+    (leafy-validate-chatgpt-response result)
     (leafy-insert-chatgpt-response-after "ChatGPT response" response)))
 
 ;; (defun my-prompt-for-input (prompt)
