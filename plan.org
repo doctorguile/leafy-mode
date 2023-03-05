@@ -2,104 +2,190 @@
 
 This project involves using the ChatGPT model from OpenAI to assist with project planning and organization within an org-mode file. The aim is to create a more streamlined workflow by allowing users to interact with the model from within Emacs.
 
-** Features
+** Functions:
 
 - `leafy-get-section-for-element`: Given an Org mode paragraph element, returns the section element that encloses it.
 - `leafy-insert-section-after`: Inserts a new section after the current one with a given title and content.
 - `leafy-get-context-at-element`: Given an Org element, returns the immediate context surrounding it.
 - `leafy-get-context`: Returns a list of all headings and their titles up to the top-level heading, along with their paragraphs.
-- `leafy-process-response`: Processes the response from the ChatGPT model and inserts it into the buffer.
+- `leafy-do-chatgpt-request`: Processes the response from the ChatGPT model and inserts it into the buffer.
 
 * Chat
 
-** How to install magit?
+** Project: Better capability for handling large documents.
+
+ChatGPT has a context size of 4096 tokens. It's easy to exceed that limit. We should use OpenAI's tiktoken Python library to count the tokens and include it as a property in the text that gets generated.
 ** ChatGPT response                                               :assistant:
-To install Magit, you can use the Emacs package manager. Follow these steps:
+It sounds like a good idea to use OpenAI's tiktoken library to count the tokens and include it as a property in the generated text to improve the handling of large documents within ChatGPT. This would allow users to have a better understanding of the context size of their input and help to prevent exceeding the limit. Do you have a plan for implementing this feature?
 
-1. Open Emacs.
-2. Press `M-x` and type `package-refresh-contents`.
-3. Press `M-x` and type `package-install`.
-4. Type `magit` and press Enter.
-5. Press "y" when prompted to install the package.
 
-Once installed, you can use Magit to manage your Git repositories directly within Emacs.
+** Initial implementation
 
-** Best way to handle my OpenAI API key? Right now it's kind of in the source code
+;; Load the python.el library
+(require 'python)
+
+;; Define a function to count the number of tokens in a string
+(defun count-tokens (string)
+  "Count the number of tokens in a string using tiktoken."
+  (let ((cmd (concat "import tiktoken; print(len(tiktoken.tokenize('" string "')));")))
+    (string-to-number (python-shell-send-string cmd))))
+
+;; Call the count-tokens function with a string argument
+(count-tokens "This is a test.")
+
+How should an emacs lisp library manage an inferior python process?
 ** ChatGPT response                                               :assistant:
-Storing an API key directly in source code is generally not considered a best practice, as it can be a security vulnerability if the code is publicly accessible or if other users have access to it. 
+There are several ways to manage an inferior Python process in Emacs Lisp. One common way is to use the `python-shell-send-string` function, as you have done in the example above. Another option is to use `python-shell-buffer-name` to create a Python process buffer and interact with it using `comint-send-string` and `comint-send-input`.
 
-One way to handle your API key more securely is to store it in a separate configuration file that is not tracked by version control software such as Git. This file can be loaded by your code at runtime using environment variables or a configuration file.
+It's important to make sure that the Python process is properly initialized and cleaned up, so you may want to use `python-shell-send-command` to send a setup command to the Python process and `python-shell-send-kill` to kill it when you're done.
 
-For example, you could create a file named `config.yml` in the root directory of your project, and add the API key as follows:
+Additionally, you should consider error handling and preventing potential security issues, such as preventing users from executing arbitrary Python code by sanitizing inputs or limiting the allowed commands.
 
-```yaml
-OPENAI_API_KEY: <your_api_key_here>
+** ERror
+
+When I run that code, I get a "no inferior python process" error. Can you write code to keep a (defvar) that is the running Python process?
+
+
+** ChatGPT response                                               :assistant:
+Sure, here's an example of how to define a `defvar` for the Python process:
+
+```
+(defvar my-python-shell nil)
+
+(defun start-python-process ()
+  "Starts a new Python process if one doesn't exist and sets `my-python-shell` variable."
+  (unless (process-live-p my-python-shell)
+    (setq my-python-shell (run-python))))
+
+(start-python-process)
 ```
 
-Then, in your code, you can load the API key from this file using a library like `pyyaml`:
+This code defines a `defvar` called `my-python-shell` and a function called `start-python-process` that starts a new Python process using the `run-python` function if one does not already exist. You can call `start-python-process` at the beginning of your code to ensure that the Python process is properly initialized before using `python-shell-send-string`.
 
-```python
-import yaml
+** Is it safe to concatenate the string in the below? I want to make sure the string gets transmitted to the python process exactly.
 
-with open("config.yml", "r") as f:
-    config = yaml.safe_load(f)
 
-openai_api_key = config["OPENAI_API_KEY"]
+;; Define a function to count the number of tokens in a string
+(defun count-tokens (string)
+  "Count the number of tokens in a string using tiktoken."
+  (let ((cmd (concat "import tiktoken; print(len(tiktoken.tokenize('" string "')));")))
+    (string-to-number (python-shell-send-string cmd))))
+** ChatGPT response                                               :assistant:
+It is generally safe to concatenate strings in Emacs Lisp, but you should be aware of the potential risks associated with injecting user input directly into a command executed by an inferior process. If the `string` argument could contain any special characters or other code that could alter the behavior of the command, you should sanitize the input to prevent security issues. One way to do this is to use the `shell-quote-argument` function to escape special characters and ensure that the string is properly formatted for execution. For example:
+
+```
+(defun count-tokens (string)
+  "Count the number of tokens in a string using tiktoken."
+  (let ((cmd (concat "import tiktoken; print(len(tiktoken.tokenize(" (shell-quote-argument string) ")));")))
+    (string-to-number (python-shell-send-string cmd))))
 ```
 
-Additionally, you can use tools like `dotenv` to manage environment variables across different environments, and avoid storing sensitive information in plaintext files.
+This version of the function uses `shell-quote-argument` to properly format the `string` argument before executing it in the Python process.
 
-** Remember leafy is written in emacs lisp. best way to handle a config file here?
+** Sorry, the function does exist. Evaluating the symbol doesn't find it, but calling it as a function does.
 ** ChatGPT response                                               :assistant:
-There are several ways to handle a configuration file in Emacs Lisp. One common approach is to store the values as variables in a separate file, and load them at runtime using the `load-file` function.
+It's possible that the `shell-quote-argument` function is not defined in the current namespace or package when you evaluate the symbol. However, calling it as a function directly should work, as Emacs automatically searches for and loads the correct function when it's called. 
 
-For example, you could create a file named `leafy-config.el` and define variables for your API key and other settings:
+If you're still having trouble accessing the function, you may want to check that the `subr.el` library, which contains the definition for `shell-quote-argument`, is properly loaded. You can check this by evaluating `(require 'subr)` in your Emacs Lisp session.
 
-```elisp
-(defvar leafy-api-key "YOUR_API_KEY")
-(defvar leafy-username "YOUR_USERNAME")
-(defvar leafy-max-response-length 1000)
+** It looks like the python-shell-send-string is returning nil instead of the expected string.
+** ChatGPT response                                               :assistant:
+If `python-shell-send-string` is returning nil instead of the expected output from the Python script, there could be several possible reasons:
+
+1. The Python script may not be returning any output. Check to make sure that the expected output is being printed to the console in the Python environment.
+2. There may be an error in the Python script that is preventing it from returning the expected output. Check the Python environment for any error messages or stack traces.
+3. The Emacs Lisp environment may not be properly connected to the Python process. Make sure that the Python process has been started and is properly initialized before calling `python-shell-send-string`.
+4. There may be an issue with the plumbing between the two processes. Check the `*Python*` buffer for any error messages.
+
+To debug this issue further, you can try adding some debug statements to your Emacs Lisp code to print intermediate values and output from the Python script. For example, you can try adding `print` statements to the Python script to verify that it's being executed and returning output, and print the value of `cmd` just before calling `python-shell-send-string` to verify that the command is correctly formatted.
+
+** Okay, I want to add properties to the assistant-generated text with:
+1. Number of input tokens
+2. Number of output tokens
+3. Number of billed tokens by OpenAI
+
+Given a response value like:
+
+((id . "chatcmpl-6qhTs8noOOunBQfYlDIh06JVMB7tF") (object . "chat.completion") (created . 1678018216) (model . "gpt-3.5-turbo-0301") (usage (prompt_tokens . 26) (completion_tokens . 43) (total_tokens . 69)) (choices . [(... ... ...)]))
+
+What's the best way to extract prompt_tokens, completion_tokens, and total_tokens?
+** ChatGPT response                                               :assistant:
+:PROPERTIES:
+:input-tokens: nil
+:output-tokens: nil
+:billed-tokens: nil
+:END:
+You can use Emacs Lisp's built-in `alist-get` function to extract specific values from an association list like the one you provided. Here's an example of how you could extract the `prompt_tokens`, `completion_tokens`, and `total_tokens` from the `usage` object:
+
+```
+(setq usage-object '((prompt_tokens . 26) (completion_tokens . 43) (total_tokens . 69)))
+
+(setq prompt-tokens (alist-get 'prompt_tokens (cdr usage-object)))
+(setq completion-tokens (alist-get 'completion_tokens (cdr usage-object)))
+(setq total-tokens (alist-get 'total_tokens (cdr usage-object)))
 ```
 
-Then, in your main `leafy.el` file, you can load the configuration file using `load-file`:
+This code creates a `usage-object` variable that contains the usage information from the OpenAI response, and then uses `alist-get` to extract the values for `prompt_tokens`, `completion_tokens`, and `total_tokens` into separate variables.
 
-```elisp
-(load-file "leafy-config.el")
+You can then use these variables to add the properties you want to the assistant-generated text. For example, you could use `format` to create a string that includes the token counts:
 
-(defun leafy-send-message (msg)
-  (let ((response (leafy-query-api msg leafy-api-key leafy-max-response-length)))
-    (message response)))
+```
+(setq input-tokens 100)
+(setq output-tokens 200)
+(setq billed-tokens 300)
+
+(setq assistant-response (concat assistant-response
+                                   (format "\nInput tokens: %d\nOutput tokens: %d\nBilled tokens: %d\n"
+                                           input-tokens output-tokens billed-tokens)))
 ```
 
-This way, you can keep your configuration values separate from your main code, and easily update them without modifying the source files.
+This code adds the `input-tokens`, `output-tokens`, and `billed-tokens` variables to the end of the `assistant-response` string in a formatted message.
 
-** Best place to put the leafy-config.el?
-
+** And what's the best way to fetch the usage object to then use alist-get on?
 ** ChatGPT response                                               :assistant:
-One common convention in Emacs Lisp is to place configuration files in a subdirectory named `.emacs.d` in your home directory. Therefore, you could create a new directory named `.emacs.d/leafy` and place the `leafy-config.el` file there. 
+:PROPERTIES:
+:input-tokens: 2090
+:output-tokens: 587
+:billed-tokens: 2677
+:END:
+The usage object is part of the OpenAI response, which is likely returned as a string by the `python-shell-send-string` function. To extract the usage object from the response string, you can use Emacs Lisp's built-in `json-read-from-string` function to parse the string as JSON and convert it into a Lisp object.
 
-To load the file at runtime, you can add the following line to your main `leafy.el` file:
+Here's an example of how you could modify the `leafy-do-chatgpt-request` function to extract the usage object and add the token counts as properties:
 
-```elisp
-(load-file (expand-file-name "leafy/leafy-config.el" user-emacs-directory))
+```
+(defun leafy-do-chatgpt-request ()
+  "Send prompt to OpenAI API and insert response into current buffer.
+Also adds token count properties to the generated text."
+  (interactive)
+  (let* ((input-content (leafy-get-element-content (org-element-at-point)))
+         (prompt (s-trim input-content))
+         (response (python-shell-send-string (concat "openai.Completion.create("
+                                                      "'engine': 'davinci',"
+                                                      "'prompt': " (json-encode prompt) ","
+                                                      "'max_tokens': 1024,"
+                                                      "'n': 1,"
+                                                      "'stop': ['\\n\\n'],"
+                                                      "'temperature': 0.5,"
+                                                      "'presence_penalty': 0.5,"
+                                                      "'frequency_penalty': 0.5,"
+                                                      ")")))
+         (response-object (json-read-from-string response))
+         (usage-object (alist-get 'usage response-object))
+         (prompt-tokens (alist-get 'prompt_tokens usage-object))
+         (completion-tokens (alist-get 'completion_tokens usage-object))
+         (total-tokens (alist-get 'total_tokens usage-object)))
+    (setq input-tokens prompt-tokens)
+    (setq output-tokens completion-tokens)
+    (setq billed-tokens total-tokens)
+
+    (let ((assistant-response (alist-get 'text (elt (alist-get 'choices response-object) 0))))
+      (org-backward-paragraph)
+      (insert "\n")
+      (insert (propertize (concat assistant-response "\nInput tokens: " (number-to-string input-tokens) "\nOutput tokens: " (number-to-string output-tokens) "\nBilled tokens: " (number-to-string billed-tokens)) 'face '(:foreground "grey")))
+      (org-forward-paragraph))))
 ```
 
-This will load the `leafy-config.el` file from the `leafy` subdirectory of your `.emacs.d` directory, regardless of your current working directory.
+This code uses `json-read-from-string` to get the response object from the OpenAI API, and then extracts the `usage` object from the response object using `alist-get`. It then uses `alist-get` again to extract the `prompt_tokens`, `completion_tokens`, and `total_tokens` from the usage object.
 
-** what's the style convention for emacs lisp? do i capitalize my variables if they're globals? or is your lowercase common?
-** ChatGPT response                                               :assistant:
-In Emacs Lisp, it is common to use lowercase for variables, even if they are globals. This is in contrast to other programming languages like Java or Python, where it is common to use uppercase for constants and globals.
-
-Additionally, Emacs Lisp has its own set of style conventions outlined in the GNU Emacs Lisp Reference Manual. Some of these conventions include:
-
-- Function and variable names should be descriptive and use hyphens to separate words (e.g. `leafy-send-message`).
-- Prefixes should be used for variables and functions with a specific purpose (e.g. `leafy-api-key`).
-- Arguments should be named `arg`, `arg1`, `arg2` if they are not used elsewhere in the function.
-- Indentation should follow a specific pattern, usually 2 or 4 spaces.
-
-Following these conventions can make your code more readable and easier to understand for other Emacs Lisp developers.
-
-** testing
-** ChatGPT response                                               :assistant:
-What would you like to test?
+Finally, it uses these tokens to set the `input-tokens`, `output-tokens`, and `billed-tokens` variables, and to add the token counts to the generated text using `propertize` and `concat`.
 

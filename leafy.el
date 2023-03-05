@@ -8,11 +8,79 @@
 	    (define-key map (kbd "C-c c") 'leafy-log-context)
             map))
 
+;; Load the python.el library
+(require 'python)
+
+(defvar leafy-python-shell nil)
+
+
+(defun start-python-process ()
+  "Starts a new Python process if one doesn't exist and sets `leafy-python-shell` variable."
+  (unless (process-live-p leafy-python-shell)
+    (setq leafy-python-shell (run-python))
+    ;; Disable native Python completion for the leafy-python-shell process
+    (set-process-query-on-exit-flag leafy-python-shell nil)
+    ;; (set-process-filter leafy-python-shell (symbol-value 'python-shell-filter))
+    ;(set-process-filter leafy-python-shell 'python-shell-filter)
+    (with-current-buffer (process-buffer leafy-python-shell)
+      (setq-local python-shell-completion-native-enable nil))))
+
+(start-python-process)
+
+(defun start-python-process ()
+  "Starts a new Python process if one doesn't exist and sets `my-python-shell` variable."
+  (unless (process-live-p leafy-python-shell)
+    (setq leafy-python-shell (run-python))))
+
+;; On Mac OSX, they use a BSD readline instead of GNU readline
+;; So, (python-shell-internal-send-string) will return the input too, separated by ^M
+(defun eval-python-integer (python-cmd)
+  (let* ((res (python-shell-internal-send-string python-cmd))
+	 (sep "")
+	 (val (delete-non-digits (nth 1 (split-string res sep)))))
+    val))
+
+(defun delete-non-digits (string)
+  "Removes all non-digit characters from the given string."
+  (replace-regexp-in-string "[^[:digit:]]" "" string))
+
+(defun python-quote-argument (string)
+  (replace-regexp-in-string "[']" "\\\\\\&" string))
+  ;;
+
+;; Define a function to count the number of tokens in a string
+(defun count-tokens (string)
+  "Count the number of tokens in a string using tiktoken."
+  (let ((cmd (concat "import tiktoken; enc = tiktoken.get_encoding('gpt2'); print(len(enc.encode('" (python-quote-argument string) "')));\n")))
+    (string-to-number (eval-python-integer cmd))))
+
+;; (delete-non-digits "aouaoueo5aoeuaoeuaoeu")
+
+;; (python-shell-send-setup-code)
+;; (setq python-shell-send-line-send-wait nil)
+;; Call the count-tokens function with a string argument
+;; (c ount-tokens "This is a' + str(2+2) + ' test.")
+;; (eval-python-integer "print(2+2)")
+;; (count-tokens "This is a test.")
+;; (python-shell-internal-send-string "print(2+2)")
+;; (process-list)
+;; (shell-quote-argument "aoeuaoeu")
+;; (process-filter (python-shell-get-process))
+;; (set-process-filter (python-shell-get-process) #'python-shell-output-filter)
+
+;; (comint-send-string (get-buffer-process "*Python*") "print(2+2)\n" :noecho)
+
+(shell-quote-argument "This is a test.")
+
+(let ((process-name "Python"))
+  (when (get-process process-name)
+    (delete-process (get-process process-name))))
+
 (defvar chatgpt-buffer
   (get-buffer-create "*ChatGPT*")
   "The buffer to log messages from the `do-chatgpt-request` function.")
 
-(defun do-chatgpt-request (chatgpt-buffer nodes)
+(defun leafy-do-chatgpt-request (chatgpt-buffer nodes)
   "Send the given list of nodes to the OpenAI Chat API and return a list of completions.
 Messages are logged to the `chatgpt-buffer`."
   (let* ((messages (mapcar (lambda (node) `((role . ,(or (nth 0 node) "user"))
@@ -51,10 +119,10 @@ Messages are logged to the `chatgpt-buffer`."
     ;;
 
 ;; Test the do-chatgpt-request function
-;; (do-chatgpt-request chatgpt-buffer '((nil "Hello, how are you?") (nil "I'm doing well, thank you.")))
+;; (leafy-do-chatgpt-request chatgpt-buffer '((nil "Hello, how are you?") (nil "I'm doing well, thank you.")))
 ;; 
 ;; (with-output-to-temp-buffer "*ChatGPT Result*"
-;;   (let* ((response (do-chatgpt-request chatgpt-buffer
+;;   (let* ((response (leafy-do-chatgpt-request chatgpt-buffer
 ;; 				       '((nil "Hello, how are you?") ("assistant" "I'm doing well, thank you."))))
 ;; 	(result (extract-chatgpt-response-message response)))
 ;;     (prin1 result)))
@@ -140,18 +208,27 @@ Messages are logged to the `chatgpt-buffer`."
     `(("user" ,whole-buffer-text)
       ("user" ,cursor-section-text))))
 
-(defun leafy-insert-section-after (title content)
+(defun leafy-insert-chatgpt-response-after (title response)
   "Insert a new section with TITLE and CONTENT immediately after the current element."
-  (let ((section (org-element-context)))
+  (let* ((section (org-element-context))
+	 (response-body (extract-chatgpt-response-message response))
+	 (usage (alist-get 'usage response))
+	 (prompt-tokens (alist-get 'prompt_tokens usage))
+	 (completion-tokens (alist-get 'completion_tokens usage))
+	 (billed-tokens (alist-get 'total_tokens usage))
+	)
     (org-insert-heading-after-current)
     (let ((new-heading (org-element-at-point)))
       (insert title)
       (insert "\n")
-      (insert content)
+      (insert response-body)
       (save-excursion
-	(let ((beg (org-element-property :begin new-heading)))
-	  (goto-char beg)
-	  (org-set-tags-to "assistant"))))
+	(org-with-point-at (org-element-property :begin new-heading)
+	  (org-set-tags-to "assistant")
+	  (org-set-property "input-tokens" (format "%S" prompt-tokens))
+	  (org-set-property "output-tokens" (format "%S" completion-tokens))
+	  (org-set-property "billed-tokens" (format "%S" billed-tokens))
+	  )))
     ;;(org-entry-put (point) "LEAFY_CONTEXT" nil)
     (outline-show-subtree)))
 
@@ -182,9 +259,8 @@ Messages are logged to the `chatgpt-buffer`."
   (interactive)
   (let* ((context (leafy-get-context))
 	 (response (do-chatgpt-request chatgpt-buffer context))
-	 (new-text (extract-chatgpt-response-message response))
 	 )
-    (leafy-insert-section-after "ChatGPT response" new-text)))
+    (leafy-insert-chatgpt-response-after "ChatGPT response" response)))
 
 ;; (defun my-prompt-for-input (prompt)
 ;; (read-string prompt))
