@@ -12,7 +12,7 @@
 (require 'python)
 
 (defvar leafy-python-shell nil)
-
+(defvar leafy-record-token-statistics t)
 
 (defun start-python-process ()
   "Starts a new Python process if one doesn't exist and sets `leafy-python-shell` variable."
@@ -120,8 +120,51 @@
 (defun leafy-validate-chatgpt-response (response)
   (when (eq (caar response) 'error)
       (user-error "ChatGPT API Error: %S" (alist-get 'message (car response)))))
-      
-  
+
+(defun leafy-extract-chatgpt-usage-statistics (response)
+  (let* ((usage (alist-get 'usage response)))
+    (unless (null usage)
+      ;; (message "%S\n" usage)
+      (let* ((input-tokens (alist-get 'prompt_tokens usage))
+	     (output-tokens (alist-get 'completion_tokens usage))
+	     (billed-tokens (alist-get 'total_tokens usage))
+	     )
+	;; (message "@@@@ foo\n")
+	`((:input-tokens . ,input-tokens)
+	  (:output-tokens . ,output-tokens)
+	  (:billed-tokens . ,billed-tokens))))))
+
+(defun foo-test ()
+  (interactive)
+  (let* ((statistics '((:input-tokens . 2924) (:output-tokens . 40) (:billed-tokens . 2964)))
+	 (input-tokens (alist-get :input-tokens statistics))
+	 (output-tokens (alist-get :output-tokens statistics))
+	 (billed-tokens (alist-get :billed-tokens statistics))
+	 )
+    (message "@@@@ {statistics:%S} {input-tokens:%S} {output-tokens:%S} {billed-tokens:%S}\n" statistics input-tokens output-tokens billed-tokens)
+    (message "@@@@@@ %S\n" `(tick-meta-counter "input-tokens" ,input-tokens))
+    (tick-meta-counter "input-tokens" input-tokens)
+    (tick-meta-counter "output-tokens" output-tokens)
+    (tick-meta-counter "billed-tokens" billed-tokens)
+    ))
+
+;; (tick-meta-counter "input-tokens" (alist-get :input-tokens '((:input-tokens . 2924) (:output-tokens . 28) (:billed-tokens . 2952))))
+(defun leafy-tick-token-counters (response)
+  (message "@@@ leafy-tick-token-counters %S\n" response)
+  (when leafy-record-token-statistics
+    (let ((statistics (leafy-extract-chatgpt-usage-statistics response)))
+      (message "@@@@ {statistics:%S}}\n" statistics)
+      (unless (null statistics)
+	(let ((input-tokens (alist-get :input-tokens statistics))
+	      (output-tokens (alist-get :input-tokens statistics))
+	      (billed-tokens (alist-get :billed-tokens statistics))
+	      )
+	  (message "@@@@ {input-tokens:%S} {output-tokens:%S} {billed-tokens:%S}\n" input-tokens output-tokens billed-tokens)
+	  (message "@@@@@@ %S\n" `(tick-meta-counter "input-tokens" ,input-tokens))
+	  (tick-meta-counter "input-tokens" input-tokens)
+	  (tick-meta-counter "output-tokens" output-tokens)
+	  (tick-meta-counter "billed-tokens" billed-tokens)
+	  )))))
 
 (defun leafy-do-chatgpt-request (chatgpt-buffer nodes)
   "Send the given list of nodes to the OpenAI Chat API and return a list of completions.
@@ -150,7 +193,6 @@ Messages are logged to the `chatgpt-buffer`."
         ;; Write the response to the chatgpt-buffer	
 	(princ (format "Request: %S\n" payload) chatgpt-buffer)
 	(princ (format "Response: %S\n" result) chatgpt-buffer)
-	(princ (format "Foo: %S\n" (caar result)) chatgpt-buffer)
 	result))))
 
 (defun extract-chatgpt-response-message (response)
@@ -306,8 +348,64 @@ Messages are logged to the `chatgpt-buffer`."
   (let* ((context (leafy-get-context))
 	 (response (leafy-do-chatgpt-request chatgpt-buffer context))
 	 )
-    (leafy-validate-chatgpt-response result)
+    (leafy-validate-chatgpt-response response)
+    (leafy-tick-token-counters response)
     (leafy-insert-chatgpt-response-after "ChatGPT response" response)))
 
-;; (defun my-prompt-for-input (prompt)
-;; (read-string prompt))
+;; Define a function to search for a tag within an org-heading
+(defun heading-with-tag-p (tag)
+  (member "my-tag" (org-get-tags)))
+
+(defun get-tagged-section (tag)
+  "Returns the section with the specified TAG."
+  (interactive "sTag: ")
+  (let ((sections '()))
+    (org-map-entries
+     (lambda ()
+       (when (org-at-heading-p)
+	 (when (member tag (org-get-tags))
+	   (push (org-element-subtree-complete (org-element-at-point)) sections)))))
+    sections))
+
+;; Use org-map-entries to retrieve a list of headings with the "my-tag" tag
+(defun get-headings-with-tag ()
+  (let ((tagged-headings '()))
+    (org-map-entries
+     (lambda ()
+       (when (heading-with-tag-p)
+         (push org-heading-components tagged-headings))))
+    tagged-headings))
+
+(defun get-property-drawer-pom (drawer-name)
+  (let ((found-pom nil))
+    (org-element-map (org-element-parse-buffer) 'property-drawer
+      (lambda (drawer)
+	(let ((pom (org-element-property :begin drawer)))
+	  (when (string= drawer-name (org-entry-get pom "drawer-name"))
+	    ;; (message (format "@@@@@@ - %S\n" drawer))
+	    (setq found-pom pom)))))
+    found-pom))
+
+
+(defun get-property-drawer-value (drawer-name key)
+  "Returns the value of the first property drawer with the specified TAG."
+  (let ((pom (get-property-drawer-pom drawer-name)))
+    (when pom (org-entry-get pom key))))
+
+(defun set-property-drawer-value (drawer-name key value &optional (create-drawer? t))
+  "Sets the value of the first property drawer with the specified TAG"
+  (let ((pom (get-property-drawer-pom drawer-name)))
+    (if pom
+	(org-entry-put pom key value)
+      (when create-drawer?
+	(org-insert-property-drawer)
+	(org-entry-put (point) "drawer-name" drawer-name)
+	(org-entry-put (point) key value))
+      )))
+
+(defun get-meta-property (key) (get-property-drawer-value "meta" key))
+(defun set-meta-property (key value) (set-property-drawer-value "meta" key value))
+(defun tick-meta-counter (key dx)
+  (let* ((x0 (string-to-number (or (get-meta-property key) "0")))
+	 (x1 (+ x0 dx)))
+    (set-meta-property key (number-to-string x1))))
