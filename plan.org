@@ -1,9 +1,9 @@
 * Leafy Metadata
 :PROPERTIES:
 :drawer-name: meta
-:input-tokens: 5693
-:output-tokens: 5693
-:billed-tokens: 6103
+:input-tokens: 214750
+:output-tokens: 35738
+:billed-tokens: 250488
 :END:
 
 * Project Summary
@@ -17,293 +17,359 @@ This project involves using the ChatGPT model from OpenAI to assist with project
 - `leafy-get-context-at-element`: Given an Org element, returns the immediate context surrounding it.
 - `leafy-get-context`: Returns a list of all headings and their titles up to the top-level heading, along with their paragraphs.
 - `leafy-do-chatgpt-request`: Processes the response from the ChatGPT model and inserts it into the buffer.
+- `get-meta-property` and `set-meta-property`: Stores a property in a global variable in the document.
+- `leafy-get-sections`: Extracts every section in the buffer as a (level, drawer, tag, title, content).
+- `leafy-get-property-drawer-for-element-section`: Gets the closest section's property drawer(holds tokens, priorities, etc.)
+- `leafy-extract-properties`: Converts a property drawer to an alist.
+- `leafy-get-priority` and `leafy-set-priority`: Given a property drawer, acts on the priority affecting whether it's included in ChatGPT's context.
+- `leafy-count-tokens`: Counts number of tokens in a string.
+
+* todo items
+** Immediate items
+*** TODO Prepare a context in a temporary buffer that can be copy-pasted to the web UI.
+*** TODO Automatically strip out context to fit within the limit.
+
+** Backlog
+*** TODO Include current price of project in the status bar.
 
 * Chat
 
 ** Project: Better capability for handling large documents.
 
-ChatGPT has a context size of 4096 tokens. It's easy to exceed that limit. We should use OpenAI's tiktoken Python library to count the tokens and include it as a property in the text that gets generated.
+ChatGPT has a context size of 4096 tokens. It's easy to exceed that limit. Next project is prioritizing what tokens end up in your context. Right now, I have to constantly delete most of the document every time I complete a major feature, and it'd be nice if the document could just grow without bound and our code gracefully handled it.
+
+Implementation strategy:
+1. (DONE) Change code so that a list of ("user" message) ("assistant" message) turns are sent instead of the whole document in one string. (Please confirm you can see this)
+2. (TODO) Infer a priority for each section: Sibling nodes are highest, then anything with explicit positive priority markers, then everything else.
+3. (TODO) Alternatively, we could ask ChatGPT to prioritize sections by choosing what things are irrelevant.
+4. (TODO) Remove sections from context using priority.
+
+*** Implementation
+
+Please implement `leafy-drop-one-section`. It's going to use a very simple rule to start.
+
+1. Start at the end of the list and remember the current level.
+2. Iterate backwards looking for the first section that increases in level.
+3. If level decreases, remember it as the current level.
+4. If we reach the beginning without finding a section, then just delete the earliest section.
+   
+Input is a list of (level, drawer, tag, title, content).
+Output is the index of the section to remove.
+*** ChatGPT response                                              :assistant:
+:PROPERTIES:
+:input-tokens: 749
+:output-tokens: 282
+:billed-tokens: 1031
+:END:
+Sure, here's an implementation for `leafy-drop-one-section`:
+
+```emacs-lisp
+(cl-defun leafy-drop-one-section (sections)
+  "Returns the index to remove of the last section that increases indentation."
+  (let ((len (length sections))
+        (indentation-level -1))
+    (dotimes (i len)
+      (let ((j (- len i 1))
+            (new-indentation-level 10000))
+        (while (and (> j 0) (<= (car (nth j sections)) indentation-level))
+          (setq j (- j 1)))
+        (setq new-indentation-level (car (nth j sections)))
+        (when (> new-indentation-level indentation-level)
+          (return-from leafy-drop-one-section j)))
+      (setq indentation-level (car (nth i sections))))))
+```
+
+This function works by looping through the sections from end to beginning and keeping track of the previous level (which starts at -1). For each section, it checks if the indentation level is smaller than the previous level, indicating that we've found a section that increases in indentation. If no such section is found, then the earliest section is returned.
+
+The return value is the index of the section to remove, which can be used to modify the original list using `(delete-at sections index)`.
+
+Let me know if you have any questions or if there's anything else you want me to add!
+
+*** Debug code
+
+This test
+
+```
+(ert-deftest test-leafy-drop-one-section ()
+  "Test for `leafy-drop-one-section` function."
+  (let ((sections '((1 nil nil "Section 1" "Text for section 1.")
+                    (2 nil nil "Subsection 1" "Text for subsection 1.")
+                    (2 nil nil "Subsection 2" "Text for subsection 2.")
+                    (3 nil nil "Subsubsection 1" "Text for subsubsection 1.")
+                    (1 nil nil "Section 2" "Text for section 2."))))
+    ;; Drop non-keeper
+    (let ((result (leafy-drop-one-section sections)))
+      (should (equal result 3))
+      (should (equal sections
+                     '((1 nil nil "Section 1" "Text for section 1.")
+                       (2 nil nil "Subsection 1" "Text for subsection 1.")
+                       (2 nil nil "Subsection 2" "Text for subsection 2.")
+                       (1 nil nil "Section 2" "Text for section 2.")))))))
+```
+
+fails with `result` being equal to 4 not 3.
+
+Your task is to debug `leafy-drop-one-section` and locate the problem. To start, produce an execution trace.
+
+*** Spam a bunch of tokens like 1000 parentheses. I want to test the context limiting code.
+*** ChatGPT response                                              :assistant:
+:PROPERTIES:
+:input-tokens: 1242
+:output-tokens: 33
+:billed-tokens: 1275
+:END:
+I'm not sure what you're trying to achieve with this request. Could you provide more information about what you're trying to test and how I can help?
+
+* test
+```emacs-lisp
+(cl-defun leafy-drop-one-section (sections)
+  "Returns the index to remove of the last section that increases indentation."
+  (let ((len (length sections))
+        (indentation-level -1))
+    (dotimes (i len)
+      (let ((j (- len i 1))
+            (new-indentation-level 10000))
+        (while (and (> j 0) (<= (car (nth j sections)) indentation-level))
+          (setq j (- j 1)))
+        (setq new-indentation-level (car (nth j sections)))
+        (when (> new-indentation-level indentation-level)
+          (return-from leafy-drop-one-section j)))
+      (setq indentation-level (car (nth i sections))))))
+```
+```emacs-lisp
+(cl-defun leafy-drop-one-section (sections)
+  "Returns the index to remove of the last section that increases indentation."
+  (let ((len (length sections))
+        (indentation-level -1))
+    (dotimes (i len)
+      (let ((j (- len i 1))
+            (new-indentation-level 10000))
+        (while (and (> j 0) (<= (car (nth j sections)) indentation-level))
+          (setq j (- j 1)))
+        (setq new-indentation-level (car (nth j sections)))
+        (when (> new-indentation-level indentation-level)
+          (return-from leafy-drop-one-section j)))
+      (setq indentation-level (car (nth i sections))))))
+```
+```emacs-lisp
+(cl-defun leafy-drop-one-section (sections)
+  "Returns the index to remove of the last section that increases indentation."
+  (let ((len (length sections))
+        (indentation-level -1))
+    (dotimes (i len)
+      (let ((j (- len i 1))
+            (new-indentation-level 10000))
+        (while (and (> j 0) (<= (car (nth j sections)) indentation-level))
+          (setq j (- j 1)))
+        (setq new-indentation-level (car (nth j sections)))
+        (when (> new-indentation-level indentation-level)
+          (return-from leafy-drop-one-section j)))
+      (setq indentation-level (car (nth i sections))))))
+```
+```emacs-lisp
+(cl-defun leafy-drop-one-section (sections)
+  "Returns the index to remove of the last section that increases indentation."
+  (let ((len (length sections))
+        (indentation-level -1))
+    (dotimes (i len)
+      (let ((j (- len i 1))
+            (new-indentation-level 10000))
+        (while (and (> j 0) (<= (car (nth j sections)) indentation-level))
+          (setq j (- j 1)))
+        (setq new-indentation-level (car (nth j sections)))
+        (when (> new-indentation-level indentation-level)
+          (return-from leafy-drop-one-section j)))
+      (setq indentation-level (car (nth i sections))))))
+```
+```emacs-lisp
+(cl-defun leafy-drop-one-section (sections)
+  "Returns the index to remove of the last section that increases indentation."
+  (let ((len (length sections))
+        (indentation-level -1))
+    (dotimes (i len)
+      (let ((j (- len i 1))
+            (new-indentation-level 10000))
+        (while (and (> j 0) (<= (car (nth j sections)) indentation-level))
+          (setq j (- j 1)))
+        (setq new-indentation-level (car (nth j sections)))
+        (when (> new-indentation-level indentation-level)
+          (return-from leafy-drop-one-section j)))
+      (setq indentation-level (car (nth i sections))))))
+```
+
+```emacs-lisp
+(cl-defun leafy-drop-one-section (sections)
+  "Returns the index to remove of the last section that increases indentation."
+  (let ((len (length sections))
+        (indentation-level -1))
+    (dotimes (i len)
+      (let ((j (- len i 1))
+            (new-indentation-level 10000))
+        (while (and (> j 0) (<= (car (nth j sections)) indentation-level))
+          (setq j (- j 1)))
+        (setq new-indentation-level (car (nth j sections)))
+        (when (> new-indentation-level indentation-level)
+          (return-from leafy-drop-one-section j)))
+      (setq indentation-level (car (nth i sections))))))
+```
+```emacs-lisp
+(cl-defun leafy-drop-one-section (sections)
+  "Returns the index to remove of the last section that increases indentation."
+  (let ((len (length sections))
+        (indentation-level -1))
+    (dotimes (i len)
+      (let ((j (- len i 1))
+            (new-indentation-level 10000))
+        (while (and (> j 0) (<= (car (nth j sections)) indentation-level))
+          (setq j (- j 1)))
+        (setq new-indentation-level (car (nth j sections)))
+        (when (> new-indentation-level indentation-level)
+          (return-from leafy-drop-one-section j)))
+      (setq indentation-level (car (nth i sections))))))
+```
+```emacs-lisp
+(cl-defun leafy-drop-one-section (sections)
+  "Returns the index to remove of the last section that increases indentation."
+  (let ((len (length sections))
+        (indentation-level -1))
+    (dotimes (i len)
+      (let ((j (- len i 1))
+            (new-indentation-level 10000))
+        (while (and (> j 0) (<= (car (nth j sections)) indentation-level))
+          (setq j (- j 1)))
+        (setq new-indentation-level (car (nth j sections)))
+        (when (> new-indentation-level indentation-level)
+          (return-from leafy-drop-one-section j)))
+      (setq indentation-level (car (nth i sections))))))
+```
+```emacs-lisp
+(cl-defun leafy-drop-one-section (sections)
+  "Returns the index to remove of the last section that increases indentation."
+  (let ((len (length sections))
+        (indentation-level -1))
+    (dotimes (i len)
+      (let ((j (- len i 1))
+            (new-indentation-level 10000))
+        (while (and (> j 0) (<= (car (nth j sections)) indentation-level))
+          (setq j (- j 1)))
+        (setq new-indentation-level (car (nth j sections)))
+        (when (> new-indentation-level indentation-level)
+          (return-from leafy-drop-one-section j)))
+      (setq indentation-level (car (nth i sections))))))
+```
+```emacs-lisp
+(cl-defun leafy-drop-one-section (sections)
+  "Returns the index to remove of the last section that increases indentation."
+  (let ((len (length sections))
+        (indentation-level -1))
+    (dotimes (i len)
+      (let ((j (- len i 1))
+            (new-indentation-level 10000))
+        (while (and (> j 0) (<= (car (nth j sections)) indentation-level))
+          (setq j (- j 1)))
+        (setq new-indentation-level (car (nth j sections)))
+        (when (> new-indentation-level indentation-level)
+          (return-from leafy-drop-one-section j)))
+      (setq indentation-level (car (nth i sections))))))
+```
+
+```emacs-lisp
+(cl-defun leafy-drop-one-section (sections)
+  "Returns the index to remove of the last section that increases indentation."
+  (let ((len (length sections))
+        (indentation-level -1))
+    (dotimes (i len)
+      (let ((j (- len i 1))
+            (new-indentation-level 10000))
+        (while (and (> j 0) (<= (car (nth j sections)) indentation-level))
+          (setq j (- j 1)))
+        (setq new-indentation-level (car (nth j sections)))
+        (when (> new-indentation-level indentation-level)
+          (return-from leafy-drop-one-section j)))
+      (setq indentation-level (car (nth i sections))))))
+```
+```emacs-lisp
+(cl-defun leafy-drop-one-section (sections)
+  "Returns the index to remove of the last section that increases indentation."
+  (let ((len (length sections))
+        (indentation-level -1))
+    (dotimes (i len)
+      (let ((j (- len i 1))
+            (new-indentation-level 10000))
+        (while (and (> j 0) (<= (car (nth j sections)) indentation-level))
+          (setq j (- j 1)))
+        (setq new-indentation-level (car (nth j sections)))
+        (when (> new-indentation-level indentation-level)
+          (return-from leafy-drop-one-section j)))
+      (setq indentation-level (car (nth i sections))))))
+```
+```emacs-lisp
+(cl-defun leafy-drop-one-section (sections)
+  "Returns the index to remove of the last section that increases indentation."
+  (let ((len (length sections))
+        (indentation-level -1))
+    (dotimes (i len)
+      (let ((j (- len i 1))
+            (new-indentation-level 10000))
+        (while (and (> j 0) (<= (car (nth j sections)) indentation-level))
+          (setq j (- j 1)))
+        (setq new-indentation-level (car (nth j sections)))
+        (when (> new-indentation-level indentation-level)
+          (return-from leafy-drop-one-section j)))
+      (setq indentation-level (car (nth i sections))))))
+```
+```emacs-lisp
+(cl-defun leafy-drop-one-section (sections)
+  "Returns the index to remove of the last section that increases indentation."
+  (let ((len (length sections))
+        (indentation-level -1))
+    (dotimes (i len)
+      (let ((j (- len i 1))
+            (new-indentation-level 10000))
+        (while (and (> j 0) (<= (car (nth j sections)) indentation-level))
+          (setq j (- j 1)))
+        (setq new-indentation-level (car (nth j sections)))
+        (when (> new-indentation-level indentation-level)
+          (return-from leafy-drop-one-section j)))
+      (setq indentation-level (car (nth i sections))))))
+```
+```emacs-lisp
+(cl-defun leafy-drop-one-section (sections)
+  "Returns the index to remove of the last section that increases indentation."
+  (let ((len (length sections))
+        (indentation-level -1))
+    (dotimes (i len)
+      (let ((j (- len i 1))
+            (new-indentation-level 10000))
+        (while (and (> j 0) (<= (car (nth j sections)) indentation-level))
+          (setq j (- j 1)))
+        (setq new-indentation-level (car (nth j sections)))
+        (when (> new-indentation-level indentation-level)
+          (return-from leafy-drop-one-section j)))
+      (setq indentation-level (car (nth i sections))))))
+```
+
+** ChatGPT, can you list out all the functions available to use?
 ** ChatGPT response                                               :assistant:
-It sounds like a good idea to use OpenAI's tiktoken library to count the tokens and include it as a property in the generated text to improve the handling of large documents within ChatGPT. This would allow users to have a better understanding of the context size of their input and help to prevent exceeding the limit. Do you have a plan for implementing this feature?
-
-*** Step 2
-Good news ChatGPT, we succeeded at the feature to count OpenAI tokens and have a function to token tokens in any string.
-
-Next up, we need to think of some ways to prioritize what tokens end up in your context. Right now, I have to constantly delete most of the document
-every time I complete a major feature, and it'd be nice if the document could just grow without bound and our code gracefully handles it.
-
-That's because I'm simply sending the whole document over all at once. Any suggestions for how we can filter the context down if it gets too big?
-
-*** ChatGPT response                                              :assistant:
 :PROPERTIES:
-:input-tokens: 724
-:output-tokens: 95
-:billed-tokens: 819
+:input-tokens: 1279
+:output-tokens: 129
+:billed-tokens: 1408
 :END:
-One idea could be to prioritize the most recent sections or paragraphs added to the document, rather than including the entire document each time. This would allow us to keep the context relevant to the current work being done, while still allowing the document to grow without issues. Another option could be to implement a sliding window approach, where we only include a certain number of sections or tokens before and after the current input. This could also help to keep the context relevant and manageable.
+Sure! Here are the functions available for use in this project:
 
-*** Good ideas.
-
-I like the idea of choosing which sections to include. We should assign each one a priority somehow.
-
-I'm thinking sibling sections are the most important, since they are effectively the "working context".
-
-Then, something like a "project summary" section should always be in scope, even if it's in a far away section.
-
-Then, something like a "list of functions available to call" can help with coding tasks.
-
-Let's plan out the priority system in more detail, and then code it. Any improvements you can think of? Anything else we should prioritize?
-
-*** Side project
-
-Hey ChatGPT, before we work on the attention, I'd like to start logging the a sum of the billed tokens. Every time we call `leafy-do-chatgpt-request`, I should accumulate
-the token counts somewhere. What's a good place for emacs lisp libraries to store project statistics like that?
-*** ChatGPT response                                              :assistant:
-:PROPERTIES:
-:input-tokens: 830
-:output-tokens: 82
-:billed-tokens: 912
-:END:
-(ChatGPT response)
-For storing project statistics like the sum of billed tokens, one option would be to use a dedicated org file where you can keep track of and update these statistics. Another possibility is to use custom variables within your Emacs Lisp code where you can store and accumulate the token counts. The latter would be more suitable if you only need to access the data within the scope of your code.
-
-*** I'm expecting users to heavily modify their org-mode files, deleting entire sections, etc. So storing in the same file doesn't seem appropriate.
-
-Well, I could store in the same file as a global or something at the top. Does org-mode have a feature like that?
-
-*** ChatGPT response                                              :assistant:
-:PROPERTIES:
-:input-tokens: 1676
-:output-tokens: 171
-:billed-tokens: 1847
-:END:
-(ChatGPT response)
-One solution for storing global variables in Emacs Lisp is to use the `defvar` keyword to define a variable with a global scope. You can also include this definition at the top of your org-mode file to ensure that it is always present. For example:
-
-```
-(defvar my-billed-tokens 0 "Global variable to store the sum of billed tokens")
-
-(defun leafy-do-chatgpt-request (input-text)
-   ;; your code here
-   (setq my-billed-tokens (+ my-billed-tokens (get-billed-tokens response)))
-   ;; more of your code here
-)
-```
-
-This would define a global variable called `my-billed-tokens` with an initial value of `0`, and then update its value whenever `leafy-do-chatgpt-request` is called.
-
-*** Nono, you misunderstand. That works if the user never exits their emacs. But not if they restart it.
-
-Compare with property drawers:
-:PROPERTIES:
-:input-tokens: 1676
-:output-tokens: 171
-:billed-tokens: 1847
-:END:
-
-These are persistent and even if you re-open the file you can extract them.
-
-Is there anything like org-mode persistent global variables?
-*** ChatGPT response                                              :assistant:
-:PROPERTIES:
-:input-tokens: 1265
-:output-tokens: 185
-:billed-tokens: 1450
-:END:
-(ChatGPT response)
-Ah, I see what you mean now. Yes, Org mode provides a feature called `PROPERTY` drawers that allow you to store metadata about a tree entry. You can use these drawers to store the billed token count and other project statistics persistently, which can then be accessed even if the file is closed and re-opened. 
-
-For example, you could add a `PROPERTY` drawer to the top level heading of your document like this:
-
-```
-* Project Planning
-:PROPERTIES:
-:input-tokens: 1676
-:output-tokens: 171
-:billed-tokens: 1847
-:END:
-```
-You can then retrieve these values with the `org-entry-get` function.
-
-```
-(org-entry-get nil "billed-tokens")
-```
-
-This would return the value of the `billed-tokens` property from the current entry.
-
-*** So I should have a "summary statistics" section somewhere with all those details.
-
-Probably at the top? With a hidden log of every request made, etc. could be useful.
-*** ChatGPT response                                              :assistant:
-:PROPERTIES:
-:input-tokens: 1420
-:output-tokens: 132
-:billed-tokens: 1552
-:END:
-(ChatGPT response)
-Yes, creating a "summary statistics" section at the top of your org-mode file would be a good idea. You can use a `PROPERTY` drawer within the section to store the billed token count, along with any other project statistics you want to keep track of.
-
-Including a log of every ChatGPT request made could also be useful for debugging purposes. You could create a separate section for the log, and use org-mode org-clock-in and org-clock-out functions to keep track of the time and duration of each request, along with any other relevant information such as the input text, output text, and token count.
-
-*** How do I fetch a specific tagged org-mode section in emacs lisp?
-*** ChatGPT response                                              :assistant:
-:PROPERTIES:
-:input-tokens: 1539
-:output-tokens: 230
-:billed-tokens: 1769
-:END:
-To fetch a specific tagged Org mode section in Emacs Lisp, you can use the `org-map-entries` function with a search string that includes the tag you want to find. Here's an example:
-
-```
-(defun get-tagged-section (tag)
-  "Returns the section with the specified TAG."
-  (interactive "sTag: ")
-  (let ((sections '()))
-    (org-map-entries
-     (lambda ()
-       (when (org-at-heading-p)
-	 (when (member tag (org-get-tags))
-	   (push (org-element-subtree-complete (org-element-at-point)) sections)))))
-    sections))
-```
-
-This function uses `org-map-entries` to iterate through all the headings in the current buffer, and checks whether they have a tag that matches the specified value. If it finds a match, it pushes the subtree element of that heading onto a list. Finally, it returns the list of all matching sections.
-
-You can call this function with a tag value, like `(get-tagged-section "mytag")`, and it will return a list of all the matching sections in the current buffer.
+- `leafy-get-section-for-element`
+- `leafy-insert-section-after`
+- `leafy-get-context-at-element`
+- `leafy-get-context`
+- `leafy-do-chatgpt-request`
+- `get-meta-property` and `set-meta-property`
+- `leafy-get-sections`
+- `leafy-get-property-drawer-for-element-section`
+- `leafy-extract-properties`
+- `leafy-get-priority`
+- `leafy-set-priority`
+- `leafy-count-tokens`
+- `leafy-drop-one-section`
 
 
-*** I think org-map-entries doesn't move the cursor, which org-get-tags and org-element-at-point rely on.
-*** ChatGPT response                                              :assistant:
-:PROPERTIES:
-:input-tokens: 1786
-:output-tokens: 301
-:billed-tokens: 2087
-:END:
-You're right, `org-map-entries` doesn't move the cursor, so `org-get-tags` and `org-element-at-point` won't work as expected. Sorry about that!
-
-Instead, you can use `org-element-map` to collect all headings with the specified tag into a list of `org-element` objects, which you can then manipulate using the various `org-element` functions. Here's an updated version of the function:
-
-```
-(defun get-tagged-sections (tag)
-  "Returns a list of all section elements with the specified TAG."
-  (interactive "sTag: ")
-  (let ((sections '()))
-    (org-element-map (org-element-parse-buffer) 'headline
-      (lambda (headline)
-	(when (member tag (org-element-property :tags headline))
-	  (push (org-element-subtree-complete headline) sections))))
-    sections))
-```
-
-This function uses `org-element-map` to iterate over all the `headline` elements in the current buffer, and checks whether they have a tag that matches the specified value. If it finds a match, it pushes the subtree element of that headline onto a list. Finally, it returns the list of all matching sections.
-
-You can call this function with a tag value, like `(get-tagged-sections "mytag")`, and it will return a list of all the matching sections in the current buffer. You can then manipulate these elements using the various `org-element` functions.
-
-** Error
-Debugger entered--Lisp error: (void-function org-element-subtree-complete)
-  (org-element-subtree-complete headline)
-** ChatGPT response                                               :assistant:
-:PROPERTIES:
-:input-tokens: 2130
-:output-tokens: 223
-:billed-tokens: 2353
-:END:
-(ChatGPT response)
-Oops, it looks like the `org-element-subtree-complete` function is not defined by default in some versions of Emacs. You can define it yourself by adding the following code to your Emacs configuration file:
-
-```
-(defun org-element-subtree-complete (element)
-  "Return the full subtree of ELEMENT, including any drawer and property elements."
-  (let ((last (org-element-property :post-affiliated element))
-        (start (org-element-property :contents-begin element))
-        (end (org-element-property :contents-end element)))
-    (if (not end) (error "Element has no contents"))
-    (buffer-substring-no-properties (point-min) start)
-    (buffer-substring-no-properties start end)
-    (when last
-      (buffer-substring-no-properties end last))))
-```
-
-This function retrieves the full subtree of an element, including any drawer and property elements. You can then use this function inside the `get-tagged-sections` function to retrieve the entire section element.
-
-I apologize for the confusion and any inconvenience this may have caused you!
-
-
-*** Instead of grabbing the entire section, is there any way to have a tagged property drawer? That's really all I need, is the property drawer.
-*** ChatGPT response                                              :assistant:
-:PROPERTIES:
-:input-tokens: 2364
-:output-tokens: 296
-:billed-tokens: 2660
-:END:
-(ChatGPT response)
-Yes, you can indeed create a property drawer with a specific tag and then retrieve its value using `org-entry-get` function.
-
-For example, you can add the following property drawer to a heading in your org-mode file:
-
-```
-:PROPERTIES:
-:my-tag: some-value
-:END:
-```
-
-Then, you can retrieve the value of the `my-tag` property using the `org-entry-get` function like this:
-
-```
-(org-entry-get (point) "my-tag")
-```
-
-This would return the value "some-value" if called from the appropriate point in the org-mode file.
-
-You can further modify `get-tagged-sections` function to extract the value of the tagged property drawer, for example:
-
-```
-(defun get-property-drawer-value (tag)
-  "Returns the value of the first property drawer with the specified TAG."
-  (interactive "sTag: ")
-  (let ((val nil))
-    (org-element-map (org-element-parse-buffer) 'property-drawer
-      (lambda (drawer)
-	(when (string= tag (org-element-property :drawer-name drawer))
-	  (setq val (org-element-property :value drawer))))))
-    val)
-``` 
-
-Here, the function searches for the first property drawer with the specified tag using `org-element-map` and sets the value if found. Finally, it returns the value of the property drawer (or nil if not found).
-
-*** I think org-element-property might not be the right function. Don't property drawers have their own API for fetching keys? Or do you mean to put drawer-name somewhere else?
-*** ChatGPT response                                              :assistant:
-:PROPERTIES:
-:input-tokens: 2676
-:output-tokens: 373
-:billed-tokens: 3049
-:END:
-(ChatGPT response)
-I apologize for the confusion. You are correct that `org-element-property` cannot be used to retrieve the properties within a `PROPERTY` drawer, as they are not exposed as direct properties of the element. Instead, you can use `org-element-property` to retrieve the drawer name, and then use `org-element-map` to search for elements with that drawer name and retrieve their properties.
-
-For example, assuming an org-mode element with the following property drawer:
-
-```
-:PROPERTIES:
-:my-tag: some-value
-:END:
-```
-
-You can use the following function to retrieve the value of the `my-tag` property:
-
-```
-(defun get-property-value (property)
-  "Returns the value of the specified PROPERTY."
-  (let ((element (org-element-at-point)))
-    (when-let ((drawer-name (org-element-property :drawer-name element)))
-      (when-let ((drawer (car (org-element-map element 'drawer
-                                (lambda (d)
-                                  (when (string= drawer-name (org-element-property :drawer-name d))
-                                    d)))))))
-        (when-let ((prop (org-element-property property drawer)))
-          (org-element-interpret-data prop))))))
-```
-
-The function first retrieves the current org-mode element at point using `org-element-at-point`. It then checks whether a property drawer is present for that element, and retrieves its name using `org-element-property`. If a drawer exists, it uses `org-element-map` to search for elements within that drawer with the same name, and retrieves their properties. Finally, the function interprets the property value using `org-element-interpret-data` and returns it.
-
-You can call this function with a property name, like `(get-property-value "my-tag")`, and it will return the value of the property.

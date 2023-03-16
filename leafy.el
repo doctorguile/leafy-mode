@@ -8,11 +8,15 @@
 	    (define-key map (kbd "C-c c") 'leafy-log-context)
             map))
 
+(require 'cl-lib)
+
 ;; Load the python.el library
 (require 'python)
 
 (defvar leafy-python-shell nil)
 (defvar leafy-record-token-statistics t)
+(defvar leafy-chatgpt-context-size 4096)
+(defvar leafy-chatgpt-output-size-reservation 1024)
 
 (defun start-python-process ()
   "Starts a new Python process if one doesn't exist and sets `leafy-python-shell` variable."
@@ -37,25 +41,39 @@
 (defun eval-python-integer (python-cmd)
   (let* ((res (python-shell-internal-send-string python-cmd))
 	 (sep "")
-	 (val (delete-non-digits (nth 1 (split-string res sep)))))
+	 (val (delete-non-digits (car (last (split-string res sep)))))
+	 )
     val))
 
 (defun delete-non-digits (string)
   "Removes all non-digit characters from the given string."
   (replace-regexp-in-string "[^[:digit:]]" "" string))
 
+;;(defun python-quote-argument (string)
+;;  (replace-regexp-in-string "[']" "\\\\\\&" (or string "")))
+;;
 (defun python-quote-argument (string)
-  (replace-regexp-in-string "[']" "\\\\\\&" string))
-  ;;
+  (replace-regexp-in-string "['\n]" (lambda (match) (if (string= match "'") "\\\\'" "\\\\n")) (or string "")))
+(ert-deftest test-python-quote-argument ()
+  (should (equal (python-quote-argument nil) ""))
+  )
 
 ;; Define a function to count the number of tokens in a string
-(defun count-tokens (string)
+(defun leafy-count-tokens (string)
   "Count the number of tokens in a string using tiktoken."
   (let ((cmd (concat "import tiktoken; enc = tiktoken.get_encoding('gpt2'); print(len(enc.encode('" (python-quote-argument string) "')));\n")))
     (string-to-number (eval-python-integer cmd))))
 
+(ert-deftest test-leafy-count-tokens ()
+  (should (equal (leafy-count-tokens "the quick brown fox") 4))
+  (should (equal (leafy-count-tokens "a b c d e") 5))
+  (should (equal (leafy-count-tokens "") 0))
+  (should (equal (leafy-count-tokens "Section 1\nText for section 1.") 8))
+  ;;(should (equal (leafy-count-tokens nil) 0))
+  )
+
 (defun leafy-get-sections ()
-  "Extracts each section in the buffer as a (tag, title, content) triplet."
+  "Extracts each section in the buffer as a (level, property drawer, tag, title, content) tuple."
   (let ((sections '()))
     (org-element-map (org-element-parse-buffer) 'section
       (lambda (section)
@@ -63,6 +81,7 @@
                (title (org-element-property :title headline))
                (content-start (org-element-property :contents-begin section))
                (content-end (org-element-property :contents-end section))
+	       (drawer (leafy-get-property-drawer-for-element-section section))
 	       (excluded-tags (append '("PROPERTIES") nil));org-element-exclude-tags))
 	       (paragraphs (org-element-map section 'paragraph 'identity))
 	       (content (apply 'concat
@@ -71,6 +90,7 @@
 			    (org-no-properties
 			     (org-element-interpret-data paragraph)))
 			  paragraphs)))
+	       (level 0)
 	       ;;(section-remove-properties (progn (org-element-map section '(property-drawer)
 	       ;;				   (lambda (drawer) (org-element-extract-element drawer)))
 	       ;;				 (buffer-substring-no-properties
@@ -89,8 +109,22 @@
                           "system"
                         "user")))
 	       )
-          (push (list tag (format "%s\n%s" title content)) sections))))
+          (push (list level drawer tag (format "%s" title) (format "%s" content)) sections))))
     (reverse sections)))
+
+(defun leafy-sections-to-chatgpt (sections)
+  "Returns a list of (tag, title + content) for a list of sections."
+  (mapcar (lambda (section)
+            (list (nth 2 section)
+                  (concat (nth 3 section) "\n" (nth 4 section))))
+          sections))
+
+(defun leafy-section-count-tokens (section)
+  "Counts the tokens in the concatenated title and content of a section."
+  (let* ((chatgpt-section (leafy-sections-to-chatgpt (list section)))
+         (title-and-content (cadr (car chatgpt-section))))
+    (leafy-count-tokens title-and-content)))
+
 ;; (delete-non-digits "aouaoueo5aoeuaoeuaoeu")
 
 ;; (python-shell-send-setup-code)
@@ -134,33 +168,19 @@
 	  (:output-tokens . ,output-tokens)
 	  (:billed-tokens . ,billed-tokens))))))
 
-(defun foo-test ()
-  (interactive)
-  (let* ((statistics '((:input-tokens . 2924) (:output-tokens . 40) (:billed-tokens . 2964)))
-	 (input-tokens (alist-get :input-tokens statistics))
-	 (output-tokens (alist-get :output-tokens statistics))
-	 (billed-tokens (alist-get :billed-tokens statistics))
-	 )
-    (message "@@@@ {statistics:%S} {input-tokens:%S} {output-tokens:%S} {billed-tokens:%S}\n" statistics input-tokens output-tokens billed-tokens)
-    (message "@@@@@@ %S\n" `(tick-meta-counter "input-tokens" ,input-tokens))
-    (tick-meta-counter "input-tokens" input-tokens)
-    (tick-meta-counter "output-tokens" output-tokens)
-    (tick-meta-counter "billed-tokens" billed-tokens)
-    ))
-
 ;; (tick-meta-counter "input-tokens" (alist-get :input-tokens '((:input-tokens . 2924) (:output-tokens . 28) (:billed-tokens . 2952))))
 (defun leafy-tick-token-counters (response)
-  (message "@@@ leafy-tick-token-counters %S\n" response)
+  ;;(message "@@@ leafy-tick-token-counters %S\n" response)
   (when leafy-record-token-statistics
     (let ((statistics (leafy-extract-chatgpt-usage-statistics response)))
-      (message "@@@@ {statistics:%S}}\n" statistics)
+      ;;(message "@@@@ {statistics:%S}}\n" statistics)
       (unless (null statistics)
 	(let ((input-tokens (alist-get :input-tokens statistics))
-	      (output-tokens (alist-get :input-tokens statistics))
+	      (output-tokens (alist-get :output-tokens statistics))
 	      (billed-tokens (alist-get :billed-tokens statistics))
 	      )
-	  (message "@@@@ {input-tokens:%S} {output-tokens:%S} {billed-tokens:%S}\n" input-tokens output-tokens billed-tokens)
-	  (message "@@@@@@ %S\n" `(tick-meta-counter "input-tokens" ,input-tokens))
+	  ;;(message "@@@@ {input-tokens:%S} {output-tokens:%S} {billed-tokens:%S}\n" input-tokens output-tokens billed-tokens)
+	  ;;(message "@@@@@@ %S\n" `(tick-meta-counter "input-tokens" ,input-tokens))
 	  (tick-meta-counter "input-tokens" input-tokens)
 	  (tick-meta-counter "output-tokens" output-tokens)
 	  (tick-meta-counter "billed-tokens" billed-tokens)
@@ -176,7 +196,7 @@ Messages are logged to the `chatgpt-buffer`."
                     (messages . ,messages)
                     (n . 1)
                     ;;(stop . [".", "!", "?"])
-                    (max_tokens . 1024)))
+                    (max_tokens . ,leafy-chatgpt-output-size-reservation)))
          (url "https://api.openai.com/v1/chat/completions")
          (headers `(("Content-Type" . "application/json")
                     ("Authorization" . ,(concat "Bearer " leafy-api-key))))
@@ -221,40 +241,6 @@ Messages are logged to the `chatgpt-buffer`."
     (princ (format "Context: %S\n" (leafy-get-context)) chatgpt-buffer))
   )
 
-;; (defun leafy-get-immediate-context ()
-;;   "Collects just the contents the current section into a ChatGPT-ready context"
-;;   (let ((node (org-element-context)))
-;;     (when (eq 'headline (org-element-type node))
-;;       (let* ((entry (org-get-entry))
-;;              (text entry))
-;; 	(when text
-;;           (list (cons 'text text)))))))
-;; (defun leafy-get-immediate-context ()
-;;   "Context for the immediate element"
-;;   (leafy-get-element-context (org-element-at-point)))
-
-;; (defun leafy-get-section-for-headline (headline)
-;;   "Given a headline element, returns the enclosing section element."
-;;   (let* ((headline-begin (org-element-property :begin headline))
-;;          (section (org-element-map (org-element-parse-buffer) 'section
-;;                     (lambda (s) (when (and (> (org-element-property :begin s) headline-begin)
-;;                                           (< (org-element-property :end s) (org-element-property :end headline)))
-;;                                   s))
-;;                     nil 'first-match)))
-;;     section))
-;; 
-;; (defun leafy-get-section-for-headline (headline)
-;;   "Given an org-mode HEADLINE element, returns the corresponding section element."
-;;   (org-element-property :parent headline))
-;; 
-;; (defun leafy-get-section-for-paragraph (paragraph)
-;;   "Returns the section object enclosing the given paragraph."
-;;   (let ((section (org-with-point-at (org-element-property :begin paragraph)
-;;                    (org-element-at-point))))
-;;     (while (not (eq (org-element-type section) 'section))
-;;       (setq section (org-element-property :parent section)))
-;;     section))
-
 (defun leafy-intervals-contain-p (start1 end1 start2 end2)
   "Check if the interval [START1, END1] is contained within [START2, END2]."
   (and (<= start2 start1)
@@ -288,11 +274,14 @@ Messages are logged to the `chatgpt-buffer`."
   "Return a list of all headings and their titles up to the top-level heading, along with their paragraphs."
   (let* (;; (whole-buffer-text (buffer-substring-no-properties 1 (point-max)))
 	 (all-sections (leafy-get-sections))
+	 (prompt-context-size (- leafy-chatgpt-context-size leafy-chatgpt-output-size-reservation))
+	 (dropped-sections (leafy-drop-sections all-sections prompt-context-size))
+	 (chatgpt-sections (leafy-sections-to-chatgpt all-sections))
 	 (cursor-section (leafy-get-section-for-element element))
 	 (cursor-section-text (buffer-substring-no-properties (org-element-property :begin cursor-section)
 							      (org-element-property :end cursor-section)))
 	 )
-    `(,@all-sections
+    `(,@chatgpt-sections
       ;; ("user" ,whole-buffer-text)
       ("user" ,cursor-section-text))))
 
@@ -409,3 +398,323 @@ Messages are logged to the `chatgpt-buffer`."
   (let* ((x0 (string-to-number (or (get-meta-property key) "0")))
 	 (x1 (+ x0 dx)))
     (set-meta-property key (number-to-string x1))))
+
+(defun leafy-get-sibling-nodes (node)
+  "Get all sibling nodes of a given NODE."
+  (when node
+    (let ((parent (org-element-property :parent node)))
+      (org-element-map parent (org-element-type node)
+        (lambda (sibling)
+          (unless (eq sibling node)
+            sibling))
+      nil 'tree))))
+(defun leafy-prioritize (ctx)
+  "Drops sections according to priority list until token limit is reached, and returns the updated context."
+  (let ((cur-section (car ctx))
+        (limit leafy-chatgpt-context-size)
+        (tokens 0)
+        (result nil))
+    (dolist (section (cdr ctx))
+      (let ((priority (leafy-get-priority section))
+            (level (car section)))
+        (when (or (not (equal level (car cur-section)))
+                  (not (member section (leafy-get-sibling-nodes cur-section)))
+                  (< priority (leafy-get-priority cur-section)))
+          (setq ctx (delete section ctx))))
+      (setq tokens (+ tokens (length section)))
+      (when (> tokens limit)
+        (setq tokens limit))
+      (setq result (cons section result)))
+    (reverse result)))
+
+(defun leafy-get-property-from-element-section (element property)
+  "Extracts PROPERTY from an `org-element-property' section of ELEMENT."
+  (let* ((section (leafy-get-section-for-element element))
+         (section-property (org-element-property section property)))
+    (when section-property
+      (org-strip-properties section-property))))
+
+(defun leafy-get-priority (section)
+  "Returns the numeric priority of SECTION based on the `:priority' property."
+  (let ((priority-str (leafy-get-property-from-element-section section :priority)))
+    (when priority-str
+      (string-to-number priority-str))))
+
+(defun leafy-with-property-drawer (element action)
+  (save-excursion
+    (org-with-point-at (org-element-property :begin (org-element-for-section element))
+      (action))))
+
+(defun leafy-get-property-drawer-for-element-section (element-section)
+  "Returns the property drawer for the given ELEMENT-SECTION as an
+   alist of property-value pairs."
+  (let ((drawer (org-element-property :drawer element-section)));;(org-element-property :parent element-section))))
+    (when (and drawer (string= (org-element-property :drawer-name drawer) "PROPERTIES"))
+      (let* ((eol (org-element-property :end drawer))
+             (bol (save-excursion
+                    (goto-char eol)
+                    (forward-line -1)
+                    (line-beginning-position)))
+             (inside (buffer-substring-no-properties (+ 1 bol) (- eol 2)))
+             (pairs (split-string inside "\n")))
+        (mapcar (lambda (pair)
+                  (let* ((parts (split-string pair ":"))
+                         (property (car parts))
+                         (value (string-trim (cadr parts))))
+                    (cons property value)))
+                pairs)))))
+
+(defun leafy-get-property-drawer-for-element-section (section-element)
+  "Given an Org mode section ELEMENT, returns the contents of its property drawer, if it has one. If there is no property drawer, returns nil."
+  (let ((properties (org-entry-properties (org-element-property :begin section-element) 'standard)))
+    ;; (message "@@@@@@ %S\n" section-element)
+    (when properties
+      (let ((drawer (cl-find-if (lambda (p) (string= (car p) "PROPERTIES")) properties)))
+        (when drawer (cdr drawer))))))
+
+(defun leafy-get-property-drawer-for-element-section (element-section)
+  "Returns the property drawer for the given ELEMENT-SECTION as an
+   alist of property-value pairs."
+  
+  (let ((drawer (org-element-property :drawer element-section)));;(org-element-property :parent element-section))))
+    (when (and drawer (string= (org-element-property :drawer-name drawer) "PROPERTIES"))
+      (let* ((eol (org-element-property :end drawer))
+             (bol (save-excursion
+                    (goto-char eol)
+                    (forward-line -1)
+                    (line-beginning-position)))
+             (inside (buffer-substring-no-properties (+ 1 bol) (- eol 2)))
+             (pairs (split-string inside "\n")))
+        (mapcar (lambda (pair)
+                  (let* ((parts (split-string pair ":"))
+                         (property (car parts))
+                         (value (string-trim (cadr parts))))
+                    (cons property value)))
+                pairs)))))
+(defun leafy-get-property-drawer-for-element-section (element)
+  "Get the first property drawer in the section that encloses the given ELEMENT."
+  (let* ((section (leafy-get-section-for-element element))
+         (drawer (org-element-map section 'drawer
+                   (lambda (d) (when (string= "PROPERTIES" (org-element-property :drawer-name d)) d))
+                   nil t)))
+    (when drawer (buffer-substring (org-element-property :contents-begin drawer) (org-element-property :contents-end drawer)))))
+;; (leafy-get-property-drawer-for-element-section (leafy-get-section-for-element (org-element-at-point)))
+
+(defun leafy-get-property-drawer-for-element-section (element)
+  "Get the first property drawer in the section that encloses the given ELEMENT.
+Returns the properties as an alist."
+  (let* ((section (leafy-get-section-for-element element))
+         (drawer (org-element-map section 'drawer
+                   (lambda (d) (when (string= "PROPERTIES" (org-element-property :drawer-name d)) d))
+                   nil t)))
+    drawer))
+
+(defun leafy-extract-properties (property-drawer)
+  "Extract key-value pairs from the given PROPERTY-DRAWER string."
+  (let ((properties ()))
+    (while (string-match "^\\s-*:\\([[:alnum:]\\-]+\\):\\s-*\\(.+\\)\\s-*$" property-drawer)
+      (push (cons (intern (downcase (match-string 1 property-drawer)))
+		  (match-string 2 property-drawer)) properties)
+      (setq property-drawer (substring property-drawer (match-end 0))))
+    (reverse properties)))
+
+(require 'ert)
+(require 'org)
+
+(ert-deftest leafy-test-get-property-drawer-for-element-section ()
+  "Test `leafy-get-property-drawer-for-element-section`."
+  (with-temp-buffer
+    (insert "
+* Section with property drawer
+
+  This is some text.
+
+  :PROPERTIES:
+  :input-tokens: 100
+  :output-tokens: 50
+  :END:
+
+  And this is some more text.
+")
+    (let* ((tree (org-element-parse-buffer))
+           (section (org-element-map tree 'section 'identity nil t)))
+      (should (equal ;;(org-element-property :drawer section) ;;section
+		     (leafy-extract-properties (leafy-get-property-drawer-for-element-section section))
+                     '((input-tokens . "100")
+                       (output-tokens . "50")))))))
+
+(defun leafy-get-priority (&optional element)
+  "Get the priority of the section that encloses the given ELEMENT."
+  (let ((section (leafy-get-section-for-element element)))
+    (when section
+      (let* ((property-drawer (leafy-get-property-drawer-for-element-section element))
+             (priority (org-entry-get property-drawer "priority")))
+	;; (message "@@@@ %S:%s" property-drawer priority)
+        (cond ((not priority) 0)
+              ((string-match-p "\\(\\+\\([0-9]+\\)\\)" priority)
+               (string-to-number (match-string 2 priority)))
+              ((string-to-number priority))
+              (t 0))))))
+
+(ert-deftest leafy-test-get-priority ()
+  (with-temp-buffer
+    (insert "
+* Top-level heading
+  :PROPERTIES:
+  :PRIORITY: 3
+  :END:
+** Subheading
+*** Sub-subheading
+    ")
+    (goto-char (point-min))
+    (let ((sections (leafy-get-sections))
+          (top-level-priority 0)
+          (subheading-priority 0)
+          (sub-subheading-priority 0))
+      (dolist (section sections)
+        (pcase section
+          (`(1 ,drawer ,tag ,title ,content)
+           (setq top-level-priority (leafy-get-priority drawer))
+           (should (equal top-level-priority 0)))
+          (`(2 ,drawer ,tag ,title ,content)
+           (setq subheading-priority (leafy-get-priority drawer))
+           (should (equal subheading-priority 3)))
+          (`(3 ,drawer ,tag ,title ,content)
+           (setq sub-subheading-priority (leafy-get-priority drawer))
+           (should (equal sub-subheading-priority 0))))))))
+
+
+(defun leafy-set-priority (element priority)
+  (let ((property-drawer (leafy-get-property-drawer-for-element-section element)))
+    (org-entry-put property-drawer "priority" (number-to-string priority))))
+
+(ert-deftest test-leafy-set-priority ()
+  "Test if leafy-set-priority sets the priority property of a section correctly."
+  (with-temp-buffer
+    (org-mode)
+    (insert "
+* Top-level heading
+  :PROPERTIES:
+  :PRIORITY: 3
+  :END:
+** Subheading
+*** Sub-subheading
+")
+    (goto-char (point-min))
+    (let ((sections (leafy-get-sections)))
+      (dolist (section sections)
+        (pcase section
+          (`(1 ,drawer ,tag ,title ,content)
+           (should (equal 0 (leafy-get-priority drawer)))
+	   (leafy-set-priority drawer 5)
+	   (should (equal 5 (leafy-get-priority drawer)))
+	   )
+          (`(2 ,drawer ,tag ,title ,content)
+	   (should (equal 3 (leafy-get-priority drawer)))
+	   (leafy-set-priority drawer 10)
+	   (should (equal 10 (leafy-get-priority drawer)))
+	   )
+          (`(3 ,drawer ,tag ,title ,content)
+	   (should (equal 0 (leafy-get-priority drawer)))
+	   (leafy-set-priority drawer 15)
+	   (should (equal 15 (leafy-get-priority drawer)))
+	   ))))))
+
+(defun leafy-print-costs ()
+  "Estimate how much $$$$ you've spent on the OpenAI so far"
+  (interactive)
+  (let* ((input-tokens (string-to-number (get-meta-property "input-tokens")))
+	 (billed-tokens (string-to-number (get-meta-property "billed-tokens")))
+	 (multiplier (/ 0.002 1000))
+	 )
+    (message "You have spent %s, %.0f%% of which was context" (* multiplier billed-tokens) (/ (* 100.0 input-tokens) billed-tokens))))
+
+(cl-defun leafy-drop-one-section (sections)
+  "Returns the index to remove of the last section that increases indentation."
+  (let ((len (length sections))
+        (indentation-level -1)
+        (found-section-index nil))
+    (dotimes (i len)
+      (let ((j (- len i 1)))
+        (when (> (car (nth j sections)) indentation-level)
+          (setq found-section-index j)
+          (setq indentation-level (car (nth j sections))))))
+    (or found-section-index 0)))
+
+(defun delete-at (list index)
+  "Delete the element at INDEX in LIST and return the modified list."
+  (if (= index 0)
+      (cdr list)
+    (let ((previous (nthcdr (1- index) list)))
+      (setcdr previous (cdr (cdr previous)))
+      list)))
+
+(defun remove-at (list index)
+  "Return a new list with the element at INDEX removed."
+  (append (cl-subseq list 0 index)
+          (cl-subseq list (1+ index))))
+
+(ert-deftest test-leafy-drop-one-section ()
+  "Test for `leafy-drop-one-section` function."
+  (let ((sections '((1 nil nil "Section 1" "Text for section 1.")
+                    (2 nil nil "Subsection 1" "Text for subsection 1.")
+                    (2 nil nil "Subsection 2" "Text for subsection 2.")
+                    (3 nil nil "Subsubsection 1" "Text for subsubsection 1.")
+                    (1 nil nil "Section 2" "Text for section 2."))))
+    ;; Drop non-keeper
+    (let* ((idx (leafy-drop-one-section sections))
+           (modified-sections (remove-at sections idx)))
+      (should (equal idx 3))
+      (should (equal modified-sections
+                     '((1 nil nil "Section 1" "Text for section 1.")
+                       (2 nil nil "Subsection 1" "Text for subsection 1.")
+                       (2 nil nil "Subsection 2" "Text for subsection 2.")
+                       (1 nil nil "Section 2" "Text for section 2.")))))))
+
+ (defun leafy-drop-sections (sections context-size)
+  "Drops sections one by one until the list fits within the CONTEXT-SIZE limit.
+  If the original list is smaller than the limit, returns the original list.
+  Otherwise, returns the new list with dropped sections."
+  (let ((new-sections sections))
+    (while (and (> (length new-sections) 1) (> (apply #'+ (mapcar (lambda (s) (leafy-count-tokens (nth 4 s))) new-sections)) context-size))
+      (let ((index-to-remove (leafy-drop-one-section new-sections)))
+        (setq new-sections (remove-at new-sections index-to-remove))))
+    new-sections))
+
+(defun leafy-section-count-tokens (section)
+  "Count the number of tokens in a section using `leafy-count-tokens`."
+  (let ((section-string (concat (nth 3 section) "\n" (nth 4 section))))
+    ;; (message "Section string: %S" section-string)
+    (leafy-count-tokens section-string)))
+
+(defun leafy-count-tokens (string)
+  "Count the number of tokens in a string using tiktoken."
+  (let ((cmd (concat "import tiktoken; enc = tiktoken.get_encoding('gpt2'); print(len(enc.encode('" (python-quote-argument string) "')));\n")))
+    ;; (message "Input string: %S" string)
+    ;; (message "Command: %S" cmd)
+    (string-to-number (eval-python-integer cmd))))
+
+(defun leafy-drop-sections (sections context-size)
+  "Drops sections one by one until the list fits within the CONTEXT-SIZE limit.
+  If the original list is smaller than the limit, returns the original list.
+  Otherwise, returns the new list with dropped sections."
+  (let ((new-sections sections))
+    (while (and (> (length new-sections) 1) (> (apply #'+ (mapcar #'leafy-section-count-tokens new-sections)) context-size))
+      (let ((index-to-remove (leafy-drop-one-section new-sections)))
+        ;; (message "Dropping index: %d" index-to-remove)
+        ;; (message "Before: %S" new-sections)
+        (setq new-sections (leafy-delete-at index-to-remove new-sections))
+        ;; (message "After: %S" new-sections)
+	))
+    new-sections))
+
+(ert-deftest test-leafy-drop-sections ()
+  (let* ((sections '((1 nil nil "Section 1" "Text for section 1.")
+                     (2 nil nil "Subsection 1" "Text for subsection 1.")
+                     (2 nil nil "Subsection 2" "Text for subsection 2.")
+                     (3 nil nil "Subsubsection 1" "Text for subsubsection 1.")
+                     (1 nil nil "Section 2" "Text for section 2.")))
+         (context-size 25) ;; Set the context size to 35, forcing at least two sections to be dropped
+         (result (leafy-drop-sections sections context-size)))
+    (message "result: %S" result)
+    (should (equal (length result) 3)))) ;; Expecting only 3 sections to remain
