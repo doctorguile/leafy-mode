@@ -1,9 +1,9 @@
 * Leafy Metadata
 :PROPERTIES:
 :drawer-name: meta
-:input-tokens: 214750
-:output-tokens: 35738
-:billed-tokens: 250488
+:input-tokens: 233380
+:output-tokens: 38456
+:billed-tokens: 271836
 :END:
 
 * Project Summary
@@ -31,345 +31,140 @@ This project involves using the ChatGPT model from OpenAI to assist with project
 
 ** Backlog
 *** TODO Include current price of project in the status bar.
+*** TODO Allow selecting between different OpenAI models, while tracking the price, context length, etc.
+*** TODO ChatGPT operator templates acting on code blocks
+*** TODO Recursive ChatGPT templates
+
 
 * Chat
 
-** Project: Better capability for handling large documents.
+** Project
 
-ChatGPT has a context size of 4096 tokens. It's easy to exceed that limit. Next project is prioritizing what tokens end up in your context. Right now, I have to constantly delete most of the document every time I complete a major feature, and it'd be nice if the document could just grow without bound and our code gracefully handled it.
+Hello ChatGPT. Today we ware working on the first item in the todo list that I expect is in your context. Can you repeat it so I know you can see it?
 
-Implementation strategy:
-1. (DONE) Change code so that a list of ("user" message) ("assistant" message) turns are sent instead of the whole document in one string. (Please confirm you can see this)
-2. (TODO) Infer a priority for each section: Sibling nodes are highest, then anything with explicit positive priority markers, then everything else.
-3. (TODO) Alternatively, we could ask ChatGPT to prioritize sections by choosing what things are irrelevant.
-4. (TODO) Remove sections from context using priority.
+** Run single test
 
-*** Implementation
-
-Please implement `leafy-drop-one-section`. It's going to use a very simple rule to start.
-
-1. Start at the end of the list and remember the current level.
-2. Iterate backwards looking for the first section that increases in level.
-3. If level decreases, remember it as the current level.
-4. If we reach the beginning without finding a section, then just delete the earliest section.
-   
-Input is a list of (level, drawer, tag, title, content).
-Output is the index of the section to remove.
-*** ChatGPT response                                              :assistant:
-:PROPERTIES:
-:input-tokens: 749
-:output-tokens: 282
-:billed-tokens: 1031
-:END:
-Sure, here's an implementation for `leafy-drop-one-section`:
-
-```emacs-lisp
-(cl-defun leafy-drop-one-section (sections)
-  "Returns the index to remove of the last section that increases indentation."
-  (let ((len (length sections))
-        (indentation-level -1))
-    (dotimes (i len)
-      (let ((j (- len i 1))
-            (new-indentation-level 10000))
-        (while (and (> j 0) (<= (car (nth j sections)) indentation-level))
-          (setq j (- j 1)))
-        (setq new-indentation-level (car (nth j sections)))
-        (when (> new-indentation-level indentation-level)
-          (return-from leafy-drop-one-section j)))
-      (setq indentation-level (car (nth i sections))))))
-```
-
-This function works by looping through the sections from end to beginning and keeping track of the previous level (which starts at -1). For each section, it checks if the indentation level is smaller than the previous level, indicating that we've found a section that increases in indentation. If no such section is found, then the earliest section is returned.
-
-The return value is the index of the section to remove, which can be used to modify the original list using `(delete-at sections index)`.
-
-Let me know if you have any questions or if there's anything else you want me to add!
-
-*** Debug code
-
-This test
-
-```
-(ert-deftest test-leafy-drop-one-section ()
-  "Test for `leafy-drop-one-section` function."
-  (let ((sections '((1 nil nil "Section 1" "Text for section 1.")
-                    (2 nil nil "Subsection 1" "Text for subsection 1.")
-                    (2 nil nil "Subsection 2" "Text for subsection 2.")
-                    (3 nil nil "Subsubsection 1" "Text for subsubsection 1.")
-                    (1 nil nil "Section 2" "Text for section 2."))))
-    ;; Drop non-keeper
-    (let ((result (leafy-drop-one-section sections)))
-      (should (equal result 3))
-      (should (equal sections
-                     '((1 nil nil "Section 1" "Text for section 1.")
-                       (2 nil nil "Subsection 1" "Text for subsection 1.")
-                       (2 nil nil "Subsection 2" "Text for subsection 2.")
-                       (1 nil nil "Section 2" "Text for section 2.")))))))
-```
-
-fails with `result` being equal to 4 not 3.
-
-Your task is to debug `leafy-drop-one-section` and locate the problem. To start, produce an execution trace.
-
-*** Spam a bunch of tokens like 1000 parentheses. I want to test the context limiting code.
-*** ChatGPT response                                              :assistant:
-:PROPERTIES:
-:input-tokens: 1242
-:output-tokens: 33
-:billed-tokens: 1275
-:END:
-I'm not sure what you're trying to achieve with this request. Could you provide more information about what you're trying to test and how I can help?
-
-* test
-```emacs-lisp
-(cl-defun leafy-drop-one-section (sections)
-  "Returns the index to remove of the last section that increases indentation."
-  (let ((len (length sections))
-        (indentation-level -1))
-    (dotimes (i len)
-      (let ((j (- len i 1))
-            (new-indentation-level 10000))
-        (while (and (> j 0) (<= (car (nth j sections)) indentation-level))
-          (setq j (- j 1)))
-        (setq new-indentation-level (car (nth j sections)))
-        (when (> new-indentation-level indentation-level)
-          (return-from leafy-drop-one-section j)))
-      (setq indentation-level (car (nth i sections))))))
-```
-```emacs-lisp
-(cl-defun leafy-drop-one-section (sections)
-  "Returns the index to remove of the last section that increases indentation."
-  (let ((len (length sections))
-        (indentation-level -1))
-    (dotimes (i len)
-      (let ((j (- len i 1))
-            (new-indentation-level 10000))
-        (while (and (> j 0) (<= (car (nth j sections)) indentation-level))
-          (setq j (- j 1)))
-        (setq new-indentation-level (car (nth j sections)))
-        (when (> new-indentation-level indentation-level)
-          (return-from leafy-drop-one-section j)))
-      (setq indentation-level (car (nth i sections))))))
-```
-```emacs-lisp
-(cl-defun leafy-drop-one-section (sections)
-  "Returns the index to remove of the last section that increases indentation."
-  (let ((len (length sections))
-        (indentation-level -1))
-    (dotimes (i len)
-      (let ((j (- len i 1))
-            (new-indentation-level 10000))
-        (while (and (> j 0) (<= (car (nth j sections)) indentation-level))
-          (setq j (- j 1)))
-        (setq new-indentation-level (car (nth j sections)))
-        (when (> new-indentation-level indentation-level)
-          (return-from leafy-drop-one-section j)))
-      (setq indentation-level (car (nth i sections))))))
-```
-```emacs-lisp
-(cl-defun leafy-drop-one-section (sections)
-  "Returns the index to remove of the last section that increases indentation."
-  (let ((len (length sections))
-        (indentation-level -1))
-    (dotimes (i len)
-      (let ((j (- len i 1))
-            (new-indentation-level 10000))
-        (while (and (> j 0) (<= (car (nth j sections)) indentation-level))
-          (setq j (- j 1)))
-        (setq new-indentation-level (car (nth j sections)))
-        (when (> new-indentation-level indentation-level)
-          (return-from leafy-drop-one-section j)))
-      (setq indentation-level (car (nth i sections))))))
-```
-```emacs-lisp
-(cl-defun leafy-drop-one-section (sections)
-  "Returns the index to remove of the last section that increases indentation."
-  (let ((len (length sections))
-        (indentation-level -1))
-    (dotimes (i len)
-      (let ((j (- len i 1))
-            (new-indentation-level 10000))
-        (while (and (> j 0) (<= (car (nth j sections)) indentation-level))
-          (setq j (- j 1)))
-        (setq new-indentation-level (car (nth j sections)))
-        (when (> new-indentation-level indentation-level)
-          (return-from leafy-drop-one-section j)))
-      (setq indentation-level (car (nth i sections))))))
-```
-
-```emacs-lisp
-(cl-defun leafy-drop-one-section (sections)
-  "Returns the index to remove of the last section that increases indentation."
-  (let ((len (length sections))
-        (indentation-level -1))
-    (dotimes (i len)
-      (let ((j (- len i 1))
-            (new-indentation-level 10000))
-        (while (and (> j 0) (<= (car (nth j sections)) indentation-level))
-          (setq j (- j 1)))
-        (setq new-indentation-level (car (nth j sections)))
-        (when (> new-indentation-level indentation-level)
-          (return-from leafy-drop-one-section j)))
-      (setq indentation-level (car (nth i sections))))))
-```
-```emacs-lisp
-(cl-defun leafy-drop-one-section (sections)
-  "Returns the index to remove of the last section that increases indentation."
-  (let ((len (length sections))
-        (indentation-level -1))
-    (dotimes (i len)
-      (let ((j (- len i 1))
-            (new-indentation-level 10000))
-        (while (and (> j 0) (<= (car (nth j sections)) indentation-level))
-          (setq j (- j 1)))
-        (setq new-indentation-level (car (nth j sections)))
-        (when (> new-indentation-level indentation-level)
-          (return-from leafy-drop-one-section j)))
-      (setq indentation-level (car (nth i sections))))))
-```
-```emacs-lisp
-(cl-defun leafy-drop-one-section (sections)
-  "Returns the index to remove of the last section that increases indentation."
-  (let ((len (length sections))
-        (indentation-level -1))
-    (dotimes (i len)
-      (let ((j (- len i 1))
-            (new-indentation-level 10000))
-        (while (and (> j 0) (<= (car (nth j sections)) indentation-level))
-          (setq j (- j 1)))
-        (setq new-indentation-level (car (nth j sections)))
-        (when (> new-indentation-level indentation-level)
-          (return-from leafy-drop-one-section j)))
-      (setq indentation-level (car (nth i sections))))))
-```
-```emacs-lisp
-(cl-defun leafy-drop-one-section (sections)
-  "Returns the index to remove of the last section that increases indentation."
-  (let ((len (length sections))
-        (indentation-level -1))
-    (dotimes (i len)
-      (let ((j (- len i 1))
-            (new-indentation-level 10000))
-        (while (and (> j 0) (<= (car (nth j sections)) indentation-level))
-          (setq j (- j 1)))
-        (setq new-indentation-level (car (nth j sections)))
-        (when (> new-indentation-level indentation-level)
-          (return-from leafy-drop-one-section j)))
-      (setq indentation-level (car (nth i sections))))))
-```
-```emacs-lisp
-(cl-defun leafy-drop-one-section (sections)
-  "Returns the index to remove of the last section that increases indentation."
-  (let ((len (length sections))
-        (indentation-level -1))
-    (dotimes (i len)
-      (let ((j (- len i 1))
-            (new-indentation-level 10000))
-        (while (and (> j 0) (<= (car (nth j sections)) indentation-level))
-          (setq j (- j 1)))
-        (setq new-indentation-level (car (nth j sections)))
-        (when (> new-indentation-level indentation-level)
-          (return-from leafy-drop-one-section j)))
-      (setq indentation-level (car (nth i sections))))))
-```
-
-```emacs-lisp
-(cl-defun leafy-drop-one-section (sections)
-  "Returns the index to remove of the last section that increases indentation."
-  (let ((len (length sections))
-        (indentation-level -1))
-    (dotimes (i len)
-      (let ((j (- len i 1))
-            (new-indentation-level 10000))
-        (while (and (> j 0) (<= (car (nth j sections)) indentation-level))
-          (setq j (- j 1)))
-        (setq new-indentation-level (car (nth j sections)))
-        (when (> new-indentation-level indentation-level)
-          (return-from leafy-drop-one-section j)))
-      (setq indentation-level (car (nth i sections))))))
-```
-```emacs-lisp
-(cl-defun leafy-drop-one-section (sections)
-  "Returns the index to remove of the last section that increases indentation."
-  (let ((len (length sections))
-        (indentation-level -1))
-    (dotimes (i len)
-      (let ((j (- len i 1))
-            (new-indentation-level 10000))
-        (while (and (> j 0) (<= (car (nth j sections)) indentation-level))
-          (setq j (- j 1)))
-        (setq new-indentation-level (car (nth j sections)))
-        (when (> new-indentation-level indentation-level)
-          (return-from leafy-drop-one-section j)))
-      (setq indentation-level (car (nth i sections))))))
-```
-```emacs-lisp
-(cl-defun leafy-drop-one-section (sections)
-  "Returns the index to remove of the last section that increases indentation."
-  (let ((len (length sections))
-        (indentation-level -1))
-    (dotimes (i len)
-      (let ((j (- len i 1))
-            (new-indentation-level 10000))
-        (while (and (> j 0) (<= (car (nth j sections)) indentation-level))
-          (setq j (- j 1)))
-        (setq new-indentation-level (car (nth j sections)))
-        (when (> new-indentation-level indentation-level)
-          (return-from leafy-drop-one-section j)))
-      (setq indentation-level (car (nth i sections))))))
-```
-```emacs-lisp
-(cl-defun leafy-drop-one-section (sections)
-  "Returns the index to remove of the last section that increases indentation."
-  (let ((len (length sections))
-        (indentation-level -1))
-    (dotimes (i len)
-      (let ((j (- len i 1))
-            (new-indentation-level 10000))
-        (while (and (> j 0) (<= (car (nth j sections)) indentation-level))
-          (setq j (- j 1)))
-        (setq new-indentation-level (car (nth j sections)))
-        (when (> new-indentation-level indentation-level)
-          (return-from leafy-drop-one-section j)))
-      (setq indentation-level (car (nth i sections))))))
-```
-```emacs-lisp
-(cl-defun leafy-drop-one-section (sections)
-  "Returns the index to remove of the last section that increases indentation."
-  (let ((len (length sections))
-        (indentation-level -1))
-    (dotimes (i len)
-      (let ((j (- len i 1))
-            (new-indentation-level 10000))
-        (while (and (> j 0) (<= (car (nth j sections)) indentation-level))
-          (setq j (- j 1)))
-        (setq new-indentation-level (car (nth j sections)))
-        (when (> new-indentation-level indentation-level)
-          (return-from leafy-drop-one-section j)))
-      (setq indentation-level (car (nth i sections))))))
-```
-
-** ChatGPT, can you list out all the functions available to use?
+How to run a single ERT test in emacs lisp?
 ** ChatGPT response                                               :assistant:
 :PROPERTIES:
-:input-tokens: 1279
-:output-tokens: 129
-:billed-tokens: 1408
+:input-tokens: 423
+:output-tokens: 106
+:billed-tokens: 529
 :END:
-Sure! Here are the functions available for use in this project:
+To run a single ERT test in Emacs Lisp, you can use the `ert-run-tests-batch-and-exit` function and specify the test name as an argument.
 
-- `leafy-get-section-for-element`
-- `leafy-insert-section-after`
-- `leafy-get-context-at-element`
-- `leafy-get-context`
-- `leafy-do-chatgpt-request`
-- `get-meta-property` and `set-meta-property`
-- `leafy-get-sections`
-- `leafy-get-property-drawer-for-element-section`
-- `leafy-extract-properties`
-- `leafy-get-priority`
-- `leafy-set-priority`
-- `leafy-count-tokens`
-- `leafy-drop-one-section`
+Here's an example code snippet that runs a single ERT test named "my-test":
 
+```
+(require 'ert)
+
+(ert-run-tests-batch-and-exit "my-test")
+```
+
+Replace "my-test" with the actual name of your test. You can also include a wildcard character `*` to run multiple tests with similar names.
+
+*** And how about an interactive command to do it?
+*** ChatGPT response                                              :assistant:
+:PROPERTIES:
+:input-tokens: 531
+:output-tokens: 168
+:billed-tokens: 699
+:END:
+(ChatGPT response)
+You can create an interactive command that prompts the user for the test name and runs the ERT test using the `ert-run-tests-batch-and-exit` function. Here's an example code snippet that defines an interactive command named "run-single-ert-test":
+
+```
+(defun run-single-ert-test ()
+  "Runs a single ERT test."
+  (interactive)
+  (let ((test-name (read-from-minibuffer "Enter ERT test name: ")))
+    (ert-run-tests-batch-and-exit test-name)))
+```
+
+This command prompts the user for the test name using `read-from-minibuffer` and passes the input to `ert-run-tests-batch-and-exit`. You can bind this command to a keybinding or menu item to make it easier to use.
+
+*** What about running the test at point?
+*** ChatGPT response                                              :assistant:
+:PROPERTIES:
+:input-tokens: 706
+:output-tokens: 241
+:billed-tokens: 947
+:END:
+To run the test at point, you can use the `ert--select-test-at-point` function to get the name of the test and then call `ert-run-tests-batch-and-exit`. Here's an example code snippet that defines an interactive command named "run-ert-test-at-point":
+
+```
+(defun run-ert-test-at-point ()
+  "Runs the ERT test at point."
+  (interactive)
+  (save-excursion
+    (end-of-line)
+    (let* ((bounds (bounds-of-thing-at-point 'symbol))
+           (test-name (buffer-substring-no-properties (car bounds) (cdr bounds))))
+      (ert-run-tests-batch-and-exit test-name))))
+```
+
+This command first moves the cursor to the end of the line containing the test definition using `end-of-line`. It then uses `bounds-of-thing-at-point` to get the boundaries of the symbol at point and `buffer-substring-no-properties` to extract the text of the symbol. Finally, it passes the test name to `ert-run-tests-batch-and-exit`. You can bind this command to a keybinding or menu item to make it easier to use.
+
+*** Does that run the test whose name is the symbol at top-level after unnecesting all the parentheses?
+
+
+*** ChatGPT response                                              :assistant:
+:PROPERTIES:
+:input-tokens: 1683
+:output-tokens: 331
+:billed-tokens: 2014
+:END:
+(ChatGPT response)
+No, the `run-ert-test-at-point` function I provided assumes that the cursor is on the line containing the test definition. It extracts the test name from the symbol at point using `bounds-of-thing-at-point` and `buffer-substring-no-properties`, but it does not un-nest any parentheses.
+
+If you want to run the test whose name is the symbol at top-level after un-nesting all the parentheses, you can modify the `run-ert-test-at-point` function to use a regular expression to search for the top-level test definition. Here's an example code snippet that accomplishes this:
+
+```
+(defun run-top-level-ert-test-at-point ()
+  "Runs the top-level ERT test at point after un-nesting parentheses."
+  (interactive)
+  (save-excursion
+    (re-search-backward "(ert-deftest \\([^ ()\t\n\r]*\\)")
+    (let* ((test-name (match-string-no-properties 1))
+           (real-test-name (cadr (split-string test-name "_"))))
+      (ert-run-tests-batch-and-exit real-test-name))))
+```
+
+This command uses `re-search-backward` to search for the closest top-level test definition before the cursor position. It extracts the test name from the first group of the regular expression, then converts it to the "real" test name by removing the test prefix and any underscores. Finally, it passes the real test name to `ert-run-tests-batch-and-exit`. Note that this assumes that the test definitions follow the naming convention of `ert-deftest`.
+
+*** I registered an interactive emacs function. How do I delete it?
+*** ChatGPT response                                              :assistant:
+:PROPERTIES:
+:input-tokens: 1301
+:output-tokens: 296
+:billed-tokens: 1597
+:END:
+(ChatGPT response)
+To unregister an interactive Emacs function, you can use the `global-unset-key` function to remove any keybinding associated with the function, then use the `fmakunbound` function to remove the function from the function table.
+
+Here's an example code snippet:
+
+```
+(global-unset-key (kbd "C-c C-l")) ;; remove keybinding
+(fmakunbound 'my-interactive-function) ;; remove function from function table
+```
+
+Replace "C-c C-l" with the keybinding associated with the function you want to remove, and "my-interactive-function" with the name of the function you want to remove.
+
+Note that if the function is defined in a loaded library or package, the function may be reloaded the next time the package or library is loaded.
+
+If you only want to temporarily disable the function without removing it, you can use `advice-add` to advise the function with a noop function that does nothing. When you want to re-enable the function, you can use `advice-remove` to remove the advice.
+
+Here's an example code snippet that temporarily disables the `my-interactive-function` function:
+
+```
+(defun noop () nil) ;; define a noop function
+
+(advice-add 'my-interactive-function :around #'noop) ;; advise the function with the noop function
+```
+
+To re-enable the function, use `(advice-remove 'my-interactive-function #'noop)`.
+
+
+*** Testing
 
