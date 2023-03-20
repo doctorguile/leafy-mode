@@ -1,10 +1,13 @@
 * Leafy Metadata
 :PROPERTIES:
 :drawer-name: meta
-:input-tokens: 233380
-:output-tokens: 38456
-:billed-tokens: 271836
+:input-tokens: 256038
+:output-tokens: 41495
+:billed-tokens: 297533
 :END:
+
+* You are ProjectGPT - a coding project assistant tool. :system:
+Include the word "cow" in your response if you can see this as a system message. Otherwise, say "duck".
 
 * Project Summary
 
@@ -26,145 +29,95 @@ This project involves using the ChatGPT model from OpenAI to assist with project
 
 * todo items
 ** Immediate items
+*** TODO Allow tagging sections with :ignore: so they get reliably dropped every time.
 *** TODO Prepare a context in a temporary buffer that can be copy-pasted to the web UI.
-*** TODO Automatically strip out context to fit within the limit.
+*** TODO Filter out later items at higher priority.
 
 ** Backlog
 *** TODO Include current price of project in the status bar.
 *** TODO Allow selecting between different OpenAI models, while tracking the price, context length, etc.
 *** TODO ChatGPT operator templates acting on code blocks
 *** TODO Recursive ChatGPT templates
+*** TODO Asynchronous Requests
+*** TODO Filter out DONE items at higher priority.
+*** TODO Timing information
+*** TODO More precise token estimation than the regex.
+*** TODO Add a 5s timeout on the ChatGPT API request.
 
+** Done items :ignore:
+*** DONE Automatically strip out context to fit within the limit.
+*** DONE Better way to count tokens than forking a separate Python process each time
 
-* Chat
+* Project
 
-** Project
+Hello ChatGPT. Today we are working on :ignore: tag support. For example, you can see the DONE tasks above correct? Those should not be visible in your context.
+So `leafy-get-context` will need to be modified.
 
-Hello ChatGPT. Today we ware working on the first item in the todo list that I expect is in your context. Can you repeat it so I know you can see it?
+I believe I have made the modifications now:
+(defun leafy-get-sections ()
+  "Extracts each section in the buffer as a (level, property alist, tag, title, content) tuple."
+  (let ((sections '()))
+    (org-element-map (org-element-parse-buffer) 'headline
+      (lambda (headline)
+        (let* ((title (substring-no-properties (car (org-element-property :title headline))))
+               (level (org-element-property :level headline))
+	       ;; Sections can be marked "assistant", "system", "user", or empty(defaults to "user")
+               (tag (if (member "assistant" (org-element-property :tags headline))
+                        "assistant"
+                      (if (member "system" (org-element-property :tags headline))
+                          "system"
+                        "user")))
+               (properties (leafy-headline-to-alist headline))
+               (section (org-element-map (org-element-contents headline) 'section 'identity nil t 'headline))
+	       (content (or (when section
+                              (leafy-section-body section))
+                            "")))
+	  ;; Prune out ignored sections.
+	  (unless (member "ignore" (org-element-property :tags headline))
+            (push (list level properties tag title (format "%s" content)) sections)))))
+    (reverse sections)))
 
-** Run single test
+However, inspecting your context I notice that I am not dropping the child sections too. The tag should drop the whole subtree, not just the one section.
 
-How to run a single ERT test in emacs lisp?
-** ChatGPT response                                               :assistant:
+Recommendations?
+
+* ChatGPT response                                                :assistant:
 :PROPERTIES:
-:input-tokens: 423
-:output-tokens: 106
-:billed-tokens: 529
+:input-tokens: 1296
+:output-tokens: 385
+:billed-tokens: 1681
+:estimated-tokens: 2289
 :END:
-To run a single ERT test in Emacs Lisp, you can use the `ert-run-tests-batch-and-exit` function and specify the test name as an argument.
-
-Here's an example code snippet that runs a single ERT test named "my-test":
+To drop the entire subtree, you can modify the `leafy-get-sections` function to recursively check all child sections of a headline for the `:ignore:` tag. Here's an updated implementation that should accomplish this:
 
 ```
-(require 'ert)
-
-(ert-run-tests-batch-and-exit "my-test")
+(defun leafy-get-sections ()
+  "Extracts each section in the buffer as a (level, property alist, tag, title, content) tuple."
+  (let ((sections '()))
+    (org-element-map (org-element-parse-buffer) 'headline
+      (lambda (headline)
+        (let* ((title (substring-no-properties (car (org-element-property :title headline))))
+	       (level (org-element-property :level headline))
+	       ;; Sections can be marked "assistant", "system", "user", or empty(defaults to "user")
+               (tag (if (member "assistant" (org-element-property :tags headline))
+                        "assistant"
+                      (if (member "system" (org-element-property :tags headline))
+                          "system"
+                        "user")))
+               (properties (leafy-headline-to-alist headline))
+               (section (org-element-map (org-element-contents headline) 'section 'identity nil t 'headline))
+	       (content (or (when section
+                              (leafy-section-body section))
+                            "")))
+	  ;; Recursively check child sections for :ignore: tag.
+	  (unless (or (member "ignore" (org-element-property :tags headline))
+                      (org-element-map (org-element-contents headline) 'headline
+                        (lambda (child)
+                          (member "ignore" (org-element-property :tags child)))
+                        nil t))
+            (push (list level properties tag title (format "%s" content)) sections)))))
+    (reverse sections)))
 ```
 
-Replace "my-test" with the actual name of your test. You can also include a wildcard character `*` to run multiple tests with similar names.
-
-*** And how about an interactive command to do it?
-*** ChatGPT response                                              :assistant:
-:PROPERTIES:
-:input-tokens: 531
-:output-tokens: 168
-:billed-tokens: 699
-:END:
-(ChatGPT response)
-You can create an interactive command that prompts the user for the test name and runs the ERT test using the `ert-run-tests-batch-and-exit` function. Here's an example code snippet that defines an interactive command named "run-single-ert-test":
-
-```
-(defun run-single-ert-test ()
-  "Runs a single ERT test."
-  (interactive)
-  (let ((test-name (read-from-minibuffer "Enter ERT test name: ")))
-    (ert-run-tests-batch-and-exit test-name)))
-```
-
-This command prompts the user for the test name using `read-from-minibuffer` and passes the input to `ert-run-tests-batch-and-exit`. You can bind this command to a keybinding or menu item to make it easier to use.
-
-*** What about running the test at point?
-*** ChatGPT response                                              :assistant:
-:PROPERTIES:
-:input-tokens: 706
-:output-tokens: 241
-:billed-tokens: 947
-:END:
-To run the test at point, you can use the `ert--select-test-at-point` function to get the name of the test and then call `ert-run-tests-batch-and-exit`. Here's an example code snippet that defines an interactive command named "run-ert-test-at-point":
-
-```
-(defun run-ert-test-at-point ()
-  "Runs the ERT test at point."
-  (interactive)
-  (save-excursion
-    (end-of-line)
-    (let* ((bounds (bounds-of-thing-at-point 'symbol))
-           (test-name (buffer-substring-no-properties (car bounds) (cdr bounds))))
-      (ert-run-tests-batch-and-exit test-name))))
-```
-
-This command first moves the cursor to the end of the line containing the test definition using `end-of-line`. It then uses `bounds-of-thing-at-point` to get the boundaries of the symbol at point and `buffer-substring-no-properties` to extract the text of the symbol. Finally, it passes the test name to `ert-run-tests-batch-and-exit`. You can bind this command to a keybinding or menu item to make it easier to use.
-
-*** Does that run the test whose name is the symbol at top-level after unnecesting all the parentheses?
-
-
-*** ChatGPT response                                              :assistant:
-:PROPERTIES:
-:input-tokens: 1683
-:output-tokens: 331
-:billed-tokens: 2014
-:END:
-(ChatGPT response)
-No, the `run-ert-test-at-point` function I provided assumes that the cursor is on the line containing the test definition. It extracts the test name from the symbol at point using `bounds-of-thing-at-point` and `buffer-substring-no-properties`, but it does not un-nest any parentheses.
-
-If you want to run the test whose name is the symbol at top-level after un-nesting all the parentheses, you can modify the `run-ert-test-at-point` function to use a regular expression to search for the top-level test definition. Here's an example code snippet that accomplishes this:
-
-```
-(defun run-top-level-ert-test-at-point ()
-  "Runs the top-level ERT test at point after un-nesting parentheses."
-  (interactive)
-  (save-excursion
-    (re-search-backward "(ert-deftest \\([^ ()\t\n\r]*\\)")
-    (let* ((test-name (match-string-no-properties 1))
-           (real-test-name (cadr (split-string test-name "_"))))
-      (ert-run-tests-batch-and-exit real-test-name))))
-```
-
-This command uses `re-search-backward` to search for the closest top-level test definition before the cursor position. It extracts the test name from the first group of the regular expression, then converts it to the "real" test name by removing the test prefix and any underscores. Finally, it passes the real test name to `ert-run-tests-batch-and-exit`. Note that this assumes that the test definitions follow the naming convention of `ert-deftest`.
-
-*** I registered an interactive emacs function. How do I delete it?
-*** ChatGPT response                                              :assistant:
-:PROPERTIES:
-:input-tokens: 1301
-:output-tokens: 296
-:billed-tokens: 1597
-:END:
-(ChatGPT response)
-To unregister an interactive Emacs function, you can use the `global-unset-key` function to remove any keybinding associated with the function, then use the `fmakunbound` function to remove the function from the function table.
-
-Here's an example code snippet:
-
-```
-(global-unset-key (kbd "C-c C-l")) ;; remove keybinding
-(fmakunbound 'my-interactive-function) ;; remove function from function table
-```
-
-Replace "C-c C-l" with the keybinding associated with the function you want to remove, and "my-interactive-function" with the name of the function you want to remove.
-
-Note that if the function is defined in a loaded library or package, the function may be reloaded the next time the package or library is loaded.
-
-If you only want to temporarily disable the function without removing it, you can use `advice-add` to advise the function with a noop function that does nothing. When you want to re-enable the function, you can use `advice-remove` to remove the advice.
-
-Here's an example code snippet that temporarily disables the `my-interactive-function` function:
-
-```
-(defun noop () nil) ;; define a noop function
-
-(advice-add 'my-interactive-function :around #'noop) ;; advise the function with the noop function
-```
-
-To re-enable the function, use `(advice-remove 'my-interactive-function #'noop)`.
-
-
-*** Testing
+With these changes, `leafy-get-sections` should now ignore any section and its children that have the `:ignore:` tag.
 

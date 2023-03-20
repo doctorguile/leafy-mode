@@ -27,6 +27,7 @@
 (defvar leafy-chatgpt-context-size 4096)
 (defvar leafy-chatgpt-output-size-reservation 1024)
 (defvar leafy-priority-key "CONTEXT-PRIORITY")
+(defvar leafy-token-counting-method 'regex) ;; '(exact regex)
 
 (defun leafy-max-prompt-size () (- leafy-chatgpt-context-size leafy-chatgpt-output-size-reservation))
 
@@ -111,24 +112,67 @@ Memoize the result and store the last 1000 command results."
   ;;(should (equal (leafy-count-tokens nil) 0))
   )
 
+(defun leafy-estimate-tokens (string)
+  (pcase leafy-token-counting-method
+    ('exact (leafy-count-tokens string))
+    ('regex (leafy-estimate-tokens-regex string))
+    (_ (user-error "Unknown token counting method: '" leafy-token-counting-method))))
+
+(defun leafy-estimate-tokens-regex (string)
+  (let ((pos 0)
+        (count 0)
+        (str-len (length string)))
+    (while (< pos str-len)
+      (let ((char (aref string pos)))
+        (cond
+         ;; Rule 1: Every punctuation is a separate token.
+         ((string-match-p "[:punct:]" (char-to-string char))
+          (setq count (1+ count))
+          (setq pos (1+ pos)))
+         ;; Rule 2: Every 4 letters is a separate token.
+         ((string-match-p "[a-zA-Z]" (char-to-string char))
+          (setq count (1+ count))
+          (setq pos (+ pos 4))
+          (when (> pos str-len)
+            (setq pos str-len)))
+         ;; Rule 3: Whitespace is a token.
+         ((string-match-p "\\s-" (char-to-string char))
+          (setq count (1+ count))
+          (setq pos (1+ pos)))
+         ;; Rule 4: Every 2 numbers is a token.
+         ((string-match-p "[0-9]" (char-to-string char))
+          (setq count (1+ count))
+          (setq pos (+ pos 2))
+          (when (> pos str-len)
+            (setq pos str-len)))
+         (t
+          (setq pos (1+ pos))))))
+    count))
+
 (defun leafy-get-sections ()
   "Extracts each section in the buffer as a (level, property alist, tag, title, content) tuple."
-  (let ((sections '()))
-    (org-element-map (org-element-parse-buffer) 'headline
+  (let* ((sections '())
+	 (whole-org-tree (org-element-parse-buffer))
+	 )
+    (org-element-map whole-org-tree 'headline
       (lambda (headline)
         (let* ((title (substring-no-properties (car (org-element-property :title headline))))
                (level (org-element-property :level headline))
-               (tag (if (member "assistant" (org-element-property :tags headline))
+	       (tags (org-element-property :tags headline))
+	       ;; Sections can be marked "assistant", "system", "user", or empty(defaults to "user")
+               (tag (if (member "assistant" tags)
                         "assistant"
-                      (if (member "system" (org-element-property :tags headline))
+                      (if (member "system" tags)
                           "system"
                         "user")))
                (properties (leafy-headline-to-alist headline))
                (section (org-element-map (org-element-contents headline) 'section 'identity nil t 'headline))
 	       (content (or (when section
                               (leafy-section-body section))
-                            "")))
-          (push (list level properties tag title (format "%s" content)) sections))))
+                            ""))
+	       )
+	  (unless (org-element-has-inherited-tag headline "ignore")
+            (push (list level properties tag title (format "%s" content)) sections)))))
     (reverse sections)))
 
 (defun leafy-section-to-chatgpt (section)
@@ -248,7 +292,7 @@ Messages are logged to the `chatgpt-buffer`."
   (unless (= (length ctx) 2)
     (user-error "leafy-context-entry-tokens: Strange context:<%S>" ctx))
   (let ((body (leafy-join ctx " ")))
-    (leafy-count-tokens body)))
+    (leafy-estimate-tokens body)))
 
 (defun leafy-log-context ()
   "Log the given context to the `chatgpt-buffer`."
@@ -302,7 +346,7 @@ Messages are logged to the `chatgpt-buffer`."
 	   (cursor-section-text (buffer-substring-no-properties (org-element-property :begin cursor-section)
 								(org-element-property :end cursor-section)))
 	   ;; Always include the last section, so deduct its tokens from max allowed.
-	   (max-prompt-size (- (leafy-max-prompt-size) (leafy-count-tokens cursor-section-text)))
+	   (max-prompt-size (- (leafy-max-prompt-size) (leafy-estimate-tokens cursor-section-text)))
 	   (dropped-sections (leafy-drop-sections all-sections max-prompt-size))
 	   (chatgpt-sections (leafy-sections-to-chatgpt dropped-sections))
 	   )
@@ -310,7 +354,7 @@ Messages are logged to the `chatgpt-buffer`."
 	;; ("user" ,whole-buffer-text)
 	("user" ,cursor-section-text)))))
 
-(defun leafy-insert-chatgpt-response-after (title response)
+(defun leafy-insert-chatgpt-response-after (title response &optional extra)
   "Insert a new section with TITLE and CONTENT immediately after the current element."
   (let* ((section (org-element-context))
 	 (response-body (extract-chatgpt-response-message response))
@@ -318,6 +362,7 @@ Messages are logged to the `chatgpt-buffer`."
 	 (prompt-tokens (alist-get 'prompt_tokens usage))
 	 (completion-tokens (alist-get 'completion_tokens usage))
 	 (billed-tokens (alist-get 'total_tokens usage))
+	 (estimated-tokens (and extra (alist-get 'estimated-tokens extra)))
 	)
     (org-insert-heading-after-current)
     (let ((new-heading (org-element-at-point)))
@@ -330,6 +375,7 @@ Messages are logged to the `chatgpt-buffer`."
 	  (org-set-property "input-tokens" (format "%S" prompt-tokens))
 	  (org-set-property "output-tokens" (format "%S" completion-tokens))
 	  (org-set-property "billed-tokens" (format "%S" billed-tokens))
+	  (when estimated-tokens (org-set-property "estimated-tokens" (format "%d" estimated-tokens)))
 	  )))
     ;;(org-entry-put (point) "LEAFY_CONTEXT" nil)
     (outline-show-subtree)))
@@ -356,10 +402,11 @@ Messages are logged to the `chatgpt-buffer`."
   (interactive)
   (let* ((context (leafy-get-context))
 	 (response (leafy-do-chatgpt-request chatgpt-buffer context))
+	 (statistics `((estimated-tokens . ,(apply #'+ (mapcar #'leafy-context-entry-tokens context)))))
 	 )
     (leafy-validate-chatgpt-response response)
     (leafy-tick-token-counters response)
-    (leafy-insert-chatgpt-response-after "ChatGPT response" response)))
+    (leafy-insert-chatgpt-response-after "ChatGPT response" response statistics)))
 
 ;; Define a function to search for a tag within an org-heading
 (defun heading-with-tag-p (tag)
@@ -426,7 +473,8 @@ Messages are logged to the `chatgpt-buffer`."
         (lambda (sibling)
           (unless (eq sibling node)
             sibling))
-      nil 'tree))))
+	nil 'tree))))
+
 (defun leafy-prioritize (ctx)
   "Drops sections according to priority list until token limit is reached, and returns the updated context."
   (let ((cur-section (car ctx))
@@ -617,16 +665,17 @@ Returns the properties as an alist."
       new-sections)))
 
 (ert-deftest test-leafy-drop-sections-1 ()
-  (let* ((sections '((1 nil nil "Section 1" "Text for section 1.")
-                     (2 nil nil "Subsection 1" "Text for subsection 1.")
-                     (2 nil nil "Subsection 2" "Text for subsection 2.")
-                     (3 nil nil "Subsubsection 1" "Text for subsubsection 1.")
-                     (1 nil nil "Section 2" "Text for section 2.")))
-         (context-size 25) ;; Set the context size to 35, forcing at least two sections to be dropped
-         (result (leafy-drop-sections sections context-size)))
-    (should (equal 46 (apply #'+ (mapcar #'leafy-section-count-tokens sections)))) ;; Before dropping any sections
-    ;; (message "result: %S" result)
-    (should (equal (length result) 3)))) ;; Expecting only 3 sections to remain
+  (let ((leafy-token-counting-method 'exact))
+    (let* ((sections '((1 nil nil "Section 1" "Text for section 1.")
+                       (2 nil nil "Subsection 1" "Text for subsection 1.")
+                       (2 nil nil "Subsection 2" "Text for subsection 2.")
+                       (3 nil nil "Subsubsection 1" "Text for subsubsection 1.")
+                       (1 nil nil "Section 2" "Text for section 2.")))
+           (context-size 25) ;; Set the context size to 35, forcing at least two sections to be dropped
+           (result (leafy-drop-sections sections context-size)))
+      (should (equal 46 (apply #'+ (mapcar #'leafy-section-count-tokens sections)))) ;; Before dropping any sections
+      ;; (message "result: %S" result)
+      (should (equal (length result) 3))))) ;; Expecting only 3 sections to remain
 
 (ert-deftest test-leafy-drop-sections-2 ()
   "Test for `leafy-drop-sections` function."

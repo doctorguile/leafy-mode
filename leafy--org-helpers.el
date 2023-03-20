@@ -466,4 +466,15 @@ aoeu
            (expected '("foo\n" "" "aoeu\n")))
       (should (equal contents expected)))))
 
+(defun leafy-element-properties (element)
+  (nth 1 element))
+
+(defun org-element-has-inherited-tag (element tag)
+  "Check if the given Org-mode ELEMENT or any of its ancestors has the specified TAG."
+  (if (null element)
+      nil
+    (let ((tags (org-element-property :tags element)))
+      (or (member tag tags)
+          (org-element-has-inherited-tag (org-element-property :parent element) tag)))))
+
 (provide 'leafy--org-helpers)
