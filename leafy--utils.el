@@ -19,4 +19,13 @@
   (let ((filtered (seq-filter (lambda (s) (and s (not (string-empty-p s)))) sequence)))
   (mapconcat #'identity filtered separator)))
 
+(defun alist-set (key value alist)
+  "Set the value associated with KEY in ALIST to VALUE.
+If KEY is already present, update its value; otherwise, add a new key-value pair to ALIST."
+  (let ((pair (assoc key alist)))
+    (if pair
+        (setcdr pair value)
+      (push (cons key value) alist))
+    alist))
+
 (provide 'leafy--utils)

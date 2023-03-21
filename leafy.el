@@ -22,15 +22,57 @@
 (require 'python)
 
 ;; Start a Python shell for leafy
-(defvar leafy-python-shell (python-shell-get-or-create-process))
+;; (defvar leafy-python-shell (python-shell-get-or-create-process))
 (defvar leafy-record-token-statistics t)
 (defvar leafy-chatgpt-context-size 4096)
 (defvar leafy-chatgpt-output-size-reservation 1024)
 (defvar leafy-priority-key "CONTEXT-PRIORITY")
 (defvar leafy-token-counting-method 'regex) ;; '(exact regex)
+(defvar leafy-chatgpt-context-buffer "*ChatGPT-Context*")
+(defvar leafy-current-model "GPT3.5")
+(defvar leafy-meta-drawer "meta") ;; Holds global statistics like token counts, etc.
+
+(defun leafy-set-current-model (model-name)
+  "Set the current model to MODEL-NAME."
+  (setq leafy-current-model model-name)
+  (setq leafy-chatgpt-context-size (leafy-model-context-size model-name)))
+
 
 (defun leafy-max-prompt-size () (- leafy-chatgpt-context-size leafy-chatgpt-output-size-reservation))
 
+(defvar leafy-model-info-alist
+  `(("GPT3.5" . ((model-name . "gpt-3.5-turbo") 
+		 (context-size . 4096)
+		 (price . ,(/ 0.002 1000)) ;; $0.002 / 1K tokens
+		 ))
+    ("GPT4" . ((model-name . "gpt-4")
+	       (context-size . 8096)
+	       (input-price . ,(/ 0.03 1000))
+	       (output-price . ,(/ 0.06 1000))
+	       ))
+    ;; Add more models here
+    ))
+
+(defun leafy-get-model-info (model-name)
+  "Get the model information alist for the given MODEL-NAME."
+  (alist-get model-name leafy-model-info-alist nil nil #'equal))
+
+(defun leafy-model-context-size (model-name)
+  "Get the context size for the given MODEL-NAME."
+  (alist-get 'context-size (leafy-get-model-info model-name)))
+
+(defun leafy-model-price (model-name)
+  "Get the (input-price . output-price) for the given MODEL-NAME."
+  (let ((price (alist-get 'price (leafy-get-model-info model-name)))
+	(input-price (alist-get 'input-price (leafy-get-model-info model-name)))
+	(output-price (alist-get 'output-price (leafy-get-model-info model-name)))
+	)
+    (cons (or input-price price) (or output-price price))))
+	 
+
+(defun leafy-model-supports-images (model-name)
+  "Check if the given MODEL-NAME supports images."
+  (alist-get 'supports-images (leafy-get-model-info model-name)))
 
 (defun start-python-process ()
   "Starts a new Python process if one doesn't exist and sets `leafy-python-shell` variable."
@@ -185,23 +227,15 @@ Memoize the result and store the last 1000 command results."
   "Returns a list of (tag, title + content) for a list of sections."
   (mapcar #'leafy-section-to-chatgpt sections))
 
-;; (delete-non-digits "aouaoueo5aoeuaoeuaoeu")
-
-;; (python-shell-send-setup-code)
-;; (setq python-shell-send-line-send-wait nil)
-;; Call the count-tokens function with a string argument
-;; (c ount-tokens "This is a' + str(2+2) + ' test.")
-;; (eval-python-integer "print(2+2)")
-;; (count-tokens "This is a test.")
-;; (python-shell-internal-send-string "print(2+2)")
-;; (process-list)
-;; (shell-quote-argument "aoeuaoeu")
-;; (process-filter (python-shell-get-process))
-;; (set-process-filter (python-shell-get-process) #'python-shell-output-filter)
-
-;; (comint-send-string (get-buffer-process "*Python*") "print(2+2)\n" :noecho)
-
-;;(shell-quote-argument "This is a test.")
+(defun leafy-dump-context ()
+  "Fetches the context at point that ChatGPT would receive, and sends it to a temporary buffer. Useful for the web UI"
+  (interactive)
+  (let* ((context (leafy-get-context))
+	 (text (mapconcat (lambda (x) (nth 1 x)) context "\n"))
+	 )
+    (with-output-to-temp-buffer leafy-chatgpt-context-buffer
+      (princ text)
+      (pop-to-buffer leafy-chatgpt-context-buffer))))
 
 ;;(let ((process-name "Python"))
 ;;  (when (get-process process-name)
@@ -234,10 +268,11 @@ Memoize the result and store the last 1000 command results."
 	(let ((input-tokens (alist-get :input-tokens statistics))
 	      (output-tokens (alist-get :output-tokens statistics))
 	      (billed-tokens (alist-get :billed-tokens statistics))
+	      (model-name leafy-current-model)
 	      )
-	  (tick-meta-counter "input-tokens" input-tokens)
-	  (tick-meta-counter "output-tokens" output-tokens)
-	  (tick-meta-counter "billed-tokens" billed-tokens)
+	  (tick-meta-model-counter model-name "input-tokens" input-tokens)
+	  (tick-meta-model-counter model-name "output-tokens" output-tokens)
+	  (tick-meta-model-counter model-name "billed-tokens" billed-tokens)
 	  )))))
 
 (defun leafy-do-chatgpt-request (chatgpt-buffer nodes)
@@ -442,10 +477,11 @@ Messages are logged to the `chatgpt-buffer`."
     found-pom))
 
 
-(defun get-property-drawer-value (drawer-name key)
+(defun get-property-drawer-value (drawer-name key &optional default)
   "Returns the value of the first property drawer with the specified TAG."
   (let ((pom (get-property-drawer-pom drawer-name)))
-    (when pom (org-entry-get pom key))))
+    (or (when pom (org-entry-get pom key))
+	default)))
 
 (cl-defun set-property-drawer-value (drawer-name key value &optional (create-drawer? t))
   "Sets the value of the first property drawer with the specified TAG"
@@ -458,12 +494,31 @@ Messages are logged to the `chatgpt-buffer`."
 	(org-entry-put (point) key value))
       )))
 
+
+(defun get-drawer-alist-property (drawer-name alist-key property-key &optional default)
+  "Parses an alist in a drawer and retrieves a key. Value is returned as a Lisp value."
+  (let* ((alist-str (get-property-drawer-value drawer-name alist-key "()"))
+	 (alist (read alist-str)))
+    (alist-get property-key alist default nil #'equal)))
+
+(defun set-drawer-alist-property (drawer-name alist-key property-key value)
+  (let* ((alist-str (get-property-drawer-value drawer-name alist-key "()"))
+	 (alist (read alist-str))
+	 (new-alist (alist-set property-key value alist)))
+    (set-property-drawer-value drawer-name alist-key (format "%S" new-alist))))
+
 (defun get-meta-property (key) (get-property-drawer-value "meta" key))
 (defun set-meta-property (key value) (set-property-drawer-value "meta" key value))
 (defun tick-meta-counter (key dx)
   (let* ((x0 (string-to-number (or (get-meta-property key) "0")))
 	 (x1 (+ x0 dx)))
     (set-meta-property key (number-to-string x1))))
+
+(defun tick-meta-model-counter (model-name key dx)
+  "Increments a model-specific counter"
+  (let* ((x (get-drawer-alist-property "meta" model-name key 0))
+	 (x-new (+ x dx)))
+    (set-drawer-alist-property "meta" model-name key x-new)))
 
 (defun leafy-get-sibling-nodes (node)
   "Get all sibling nodes of a given NODE."
@@ -613,6 +668,40 @@ Returns the properties as an alist."
 	 (multiplier (/ 0.002 1000))
 	 )
     (message "You have spent %s, %.0f%% of which was context" (* multiplier billed-tokens) (/ (* 100.0 input-tokens) billed-tokens))))
+
+(defun leafy-print-costs ()
+  "Estimate how much $$$$ you've spent on the OpenAI so far"
+  (interactive)
+  (let* ((total-cost 0)
+         (total-input-tokens 0)
+         (total-billed-tokens 0))
+    ;; Iterate over leafy-model-info-alist
+    (dolist (model leafy-model-info-alist)
+      (let* ((model-name (car model))
+             (price (leafy-model-price model-name))
+	     (input-price (car price))
+	     (output-price (cdr price))
+	     (model-input-tokens (get-drawer-alist-property "meta" model-name "input-tokens" 0))
+	     (model-output-tokens (get-drawer-alist-property "meta" model-name "output-tokens" 0))
+	     (model-billed-tokens (get-drawer-alist-property "meta" model-name "billed-tokens" 0))
+	     (model-input-cost (* input-price model-input-tokens))
+	     (model-output-cost (* output-price model-output-tokens))
+             (model-cost (+ model-input-cost model-output-cost))
+	     )
+	;; (message "@@@@ model-name:%s info:%S" model-name
+	;; 	 `((price . ,price)
+	;; 	   (cost . ,model-cost)
+	;; 	   (mic . ,model-input-cost)
+	;; 	   (mit . ,model-input-tokens)
+	;; 	   (mot . ,model-output-tokens)
+	;; 	   (mbt . ,model-billed-tokens)))
+        (setq total-cost (+ total-cost model-cost))
+        (setq total-input-tokens (+ total-input-tokens model-input-tokens))
+        (setq total-billed-tokens (+ total-billed-tokens model-billed-tokens))
+	(unless (= 0 model-billed-tokens)
+          (message "Model %s has cost $%.2f" model-name model-cost))))
+    (message "Total cost: $%.2f, %.0f%% of which was context" total-cost (/ (* 100.0 total-input-tokens) total-billed-tokens))))
+(get-drawer-alist-property "meta" "GPT3.5" "input-tokens" 0)
 
 (cl-defun leafy-drop-one-section (sections)
   "Returns the index to remove of the last section that increases indentation."

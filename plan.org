@@ -1,24 +1,21 @@
 * Leafy Metadata
 :PROPERTIES:
 :drawer-name: meta
-:input-tokens: 256038
-:output-tokens: 41495
-:billed-tokens: 297533
+:GPT3.5:   (("input-tokens" . 257748) ("output-tokens" . 41686) ("billed-tokens" . 299434))
 :END:
 
 * You are ProjectGPT - a coding project assistant tool. :system:
-Include the word "cow" in your response if you can see this as a system message. Otherwise, say "duck".
-
 * Project Summary
 
 This project involves using the ChatGPT model from OpenAI to assist with project planning and organization within an org-mode file. The aim is to create a more streamlined workflow by allowing users to interact with the model from within Emacs.
-
+(get-drawer-alist-property "meta" "GPT3.5" "input-tokens" 0)
+(alist-get "billed-tokens" (read (get-property-drawer-value "meta" "GPT3.5")) nil nil #'equal)
 ** Functions:
 
 - `leafy-get-section-for-element`: Given an Org mode paragraph element, returns the section element that encloses it.
 - `leafy-insert-section-after`: Inserts a new section after the current one with a given title and content.
 - `leafy-get-context-at-element`: Given an Org element, returns the immediate context surrounding it.
-- `leafy-get-context`: Returns a list of all headings and their titles up to the top-level heading, along with their paragraphs.
+- `leafy-get-context`: Returns a list of (role, message) ready to send to ChatGPT.
 - `leafy-do-chatgpt-request`: Processes the response from the ChatGPT model and inserts it into the buffer.
 - `get-meta-property` and `set-meta-property`: Stores a property in a global variable in the document.
 - `leafy-get-sections`: Extracts every section in the buffer as a (level, drawer, tag, title, content).
@@ -28,96 +25,119 @@ This project involves using the ChatGPT model from OpenAI to assist with project
 - `leafy-count-tokens`: Counts number of tokens in a string.
 
 * todo items
-** Immediate items
-*** TODO Allow tagging sections with :ignore: so they get reliably dropped every time.
-*** TODO Prepare a context in a temporary buffer that can be copy-pasted to the web UI.
+** attention management
 *** TODO Filter out later items at higher priority.
+*** TODO Filter out DONE items at higher priority.
+*** TODO More precise token estimation than the regex.
 
-** Backlog
+** misc
 *** TODO Include current price of project in the status bar.
 *** TODO Allow selecting between different OpenAI models, while tracking the price, context length, etc.
+*** TODO Timing information
+*** TODO Add a 5s timeout on the ChatGPT API request.
+*** TODO Show the current selected model in the status bar, with a dropdown for changing it.
+
+** projects
 *** TODO ChatGPT operator templates acting on code blocks
 *** TODO Recursive ChatGPT templates
 *** TODO Asynchronous Requests
-*** TODO Filter out DONE items at higher priority.
-*** TODO Timing information
-*** TODO More precise token estimation than the regex.
-*** TODO Add a 5s timeout on the ChatGPT API request.
 
 ** Done items :ignore:
+*** DONE Prepare a context in a temporary buffer that can be copy-pasted to the web UI.
+*** DONE Allow tagging sections with :ignore: so they get reliably dropped every time.
 *** DONE Automatically strip out context to fit within the limit.
 *** DONE Better way to count tokens than forking a separate Python process each time
 
 * Project
 
-Hello ChatGPT. Today we are working on :ignore: tag support. For example, you can see the DONE tasks above correct? Those should not be visible in your context.
-So `leafy-get-context` will need to be modified.
+Today we're working on support for switching between models.
+Right now, I have many configuration variables here:
 
-I believe I have made the modifications now:
-(defun leafy-get-sections ()
-  "Extracts each section in the buffer as a (level, property alist, tag, title, content) tuple."
-  (let ((sections '()))
-    (org-element-map (org-element-parse-buffer) 'headline
-      (lambda (headline)
-        (let* ((title (substring-no-properties (car (org-element-property :title headline))))
-               (level (org-element-property :level headline))
-	       ;; Sections can be marked "assistant", "system", "user", or empty(defaults to "user")
-               (tag (if (member "assistant" (org-element-property :tags headline))
-                        "assistant"
-                      (if (member "system" (org-element-property :tags headline))
-                          "system"
-                        "user")))
-               (properties (leafy-headline-to-alist headline))
-               (section (org-element-map (org-element-contents headline) 'section 'identity nil t 'headline))
-	       (content (or (when section
-                              (leafy-section-body section))
-                            "")))
-	  ;; Prune out ignored sections.
-	  (unless (member "ignore" (org-element-property :tags headline))
-            (push (list level properties tag title (format "%s" content)) sections)))))
-    (reverse sections)))
+(defvar leafy-python-shell (python-shell-get-or-create-process))
+(defvar leafy-record-token-statistics t)
+(defvar leafy-chatgpt-context-size 4096)
+(defvar leafy-chatgpt-output-size-reservation 1024)
+(defvar leafy-priority-key "CONTEXT-PRIORITY")
+(defvar leafy-token-counting-method 'regex) ;; '(exact regex)
+(defvar leafy-chatgpt-context-buffer "*ChatGPT-Context*")
 
-However, inspecting your context I notice that I am not dropping the child sections too. The tag should drop the whole subtree, not just the one section.
+We need some way to keep a whitelist of model strings, along with their associated information like context size, pricing, whether they support images, etc.
 
-Recommendations?
+What's the best way to approach this?
 
-* ChatGPT response                                                :assistant:
+The best way to approach this would be to create an alist containing the information about each model. You can store this information in a variable and use functions to access and modify the information as needed.
+
+First, create a variable to store the model information:
+
+elisp
+Copy code
+(defvar leafy-model-info-alist
+  '((model1 (name . "Model 1")
+            (context-size . 4096)
+            (price . 0.01)
+            (supports-images . t))
+    (model2 (name . "Model 2")
+            (context-size . 2048)
+            (price . 0.008)
+            (supports-images . nil))
+    ;; Add more models here
+    ))
+Now, you can create functions to access and manipulate the model information:
+
+A function to get a model's information by its name:
+elisp
+Copy code
+(defun leafy-get-model-info (model-name)
+  "Get the model information alist for the given MODEL-NAME."
+  (cdr (assoc model-name leafy-model-info-alist)))
+Functions to get specific properties of a model:
+elisp
+Copy code
+(defun leafy-model-context-size (model-name)
+  "Get the context size for the given MODEL-NAME."
+  (cdr (assoc 'context-size (leafy-get-model-info model-name))))
+
+(defun leafy-model-price (model-name)
+  "Get the price for the given MODEL-NAME."
+  (cdr (assoc 'price (leafy-get-model-info model-name))))
+
+(defun leafy-model-supports-images (model-name)
+  "Check if the given MODEL-NAME supports images."
+  (cdr (assoc 'supports-images (leafy-get-model-info model-name))))
+A function to set the current model:
+elisp
+Copy code
+(defvar leafy-current-model 'model1)
+
+(defun leafy-set-current-model (model-name)
+  "Set the current model to MODEL-NAME."
+  (setq leafy-current-model model-name)
+  (setq leafy-chatgpt-context-size (leafy-model-context-size model-name)))
+Now you have an easy way to manage the model information and switch between models by calling leafy-set-current-model. You can also add new models to leafy-model-info-alist as needed.
+
+*** Convert symbol to string in emacs lisp
+*** ChatGPT response                                              :assistant:
 :PROPERTIES:
-:input-tokens: 1296
-:output-tokens: 385
-:billed-tokens: 1681
-:estimated-tokens: 2289
+:input-tokens: 1169
+:output-tokens: 169
+:billed-tokens: 1338
+:estimated-tokens: 1713
 :END:
-To drop the entire subtree, you can modify the `leafy-get-sections` function to recursively check all child sections of a headline for the `:ignore:` tag. Here's an updated implementation that should accomplish this:
+To convert a symbol to a string in Emacs Lisp, you can use the `symbol-name` function. This function takes a symbol as its argument and returns its name as a string.
 
-```
-(defun leafy-get-sections ()
-  "Extracts each section in the buffer as a (level, property alist, tag, title, content) tuple."
-  (let ((sections '()))
-    (org-element-map (org-element-parse-buffer) 'headline
-      (lambda (headline)
-        (let* ((title (substring-no-properties (car (org-element-property :title headline))))
-	       (level (org-element-property :level headline))
-	       ;; Sections can be marked "assistant", "system", "user", or empty(defaults to "user")
-               (tag (if (member "assistant" (org-element-property :tags headline))
-                        "assistant"
-                      (if (member "system" (org-element-property :tags headline))
-                          "system"
-                        "user")))
-               (properties (leafy-headline-to-alist headline))
-               (section (org-element-map (org-element-contents headline) 'section 'identity nil t 'headline))
-	       (content (or (when section
-                              (leafy-section-body section))
-                            "")))
-	  ;; Recursively check child sections for :ignore: tag.
-	  (unless (or (member "ignore" (org-element-property :tags headline))
-                      (org-element-map (org-element-contents headline) 'headline
-                        (lambda (child)
-                          (member "ignore" (org-element-property :tags child)))
-                        nil t))
-            (push (list level properties tag title (format "%s" content)) sections)))))
-    (reverse sections)))
+Here's an example:
+
+``` emacs-lisp
+(setq my-symbol 'some-symbol)
+(setq my-string (symbol-name my-symbol))
 ```
 
-With these changes, `leafy-get-sections` should now ignore any section and its children that have the `:ignore:` tag.
+In this example, the `symbol-name` function is used to convert the `my-symbol` variable from a symbol to a string, which is then stored in the `my-string` variable.
+
+Note that if you want to convert a string to a symbol, you can use the `intern` function. This function takes a string as its argument and returns a symbol with that name. Here's an example:
+
+``` emacs-lisp
+(setq my-string "some-symbol")
+(setq my-symbol (intern my-string))
+```
 
