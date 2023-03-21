@@ -329,7 +329,22 @@ Memoize the result and store the last 1000 command results."
 	  (tick-meta-model-counter model-name "billed-tokens" billed-tokens)
 	  )))))
 
-(defun leafy-do-chatgpt-request (chatgpt-buffer nodes)
+(defun request-completion-at-point-synchronous ()
+  "Send the current node and main text of every node up to the top-level to ChatGPT for completion."
+  (interactive)
+  (let* ((context (leafy-get-context))
+	 (placeholder (make-marker))
+	 )
+    (leafy-insert-placeholder)
+    (let* ((response (leafy-do-chatgpt-request chatgpt-buffer context))
+	   (statistics `((estimated-tokens . ,(apply #'+ (mapcar #'leafy-context-entry-tokens context)))))
+	   )
+
+    (leafy-validate-chatgpt-response response)
+    (leafy-tick-token-counters response)
+    (leafy-insert-chatgpt-response-after "ChatGPT response" response statistics)))WAITING-ON-REQUEST
+  
+(defun leafy-do-chatgpt-request-synchronous (chatgpt-buffer nodes)
   "Send the given list of nodes to the OpenAI Chat API and return a list of completions.
 Messages are logged to the `chatgpt-buffer`."
   (let* ((messages (mapcar (lambda (node) `((role . ,(or (nth 0 node) "user"))
@@ -358,6 +373,92 @@ Messages are logged to the `chatgpt-buffer`."
 	(princ (format "Request: %S\n" payload) chatgpt-buffer)
 	(princ (format "Response: %S\n" result) chatgpt-buffer)
 	result))))
+
+(defun leafy-do-chatgpt-request (chatgpt-buffer context cbargs callback)
+  "Asynchronously send the given list of context nodes to the OpenAI Chat API and return a list of completions.
+Messages are logged to the `chatgpt-buffer`. Calls `callback` with the API response."
+  (let* ((messages (mapcar (lambda (node) `((role . ,(or (nth 0 node) "user"))
+                                            (content . ,(nth 1 node))))
+                            context))
+         (model-id (leafy-model-openai-id leafy-current-model))
+         (payload `((model . ,model-id)
+                    (messages . ,messages)
+                    (n . 1)
+                    ;;(stop . [".", "!", "?"])
+                    (max_tokens . ,leafy-chatgpt-output-size-reservation)))
+         (url "https://api.openai.com/v1/chat/completions")
+         (headers `(("Content-Type" . "application/json")
+                    ("Authorization" . ,(concat "Bearer " leafy-api-key))))
+         (url-request-method "POST")
+         (url-request-extra-headers headers)
+         (url-request-data (json-encode payload))
+         )
+    ;; Send the request to the OpenAI API
+    (url-retrieve url (lambda (status chatgpt-buffer payload callback context cbargs)
+                        ;; Parse the response and return the completions
+                        (goto-char (point-min))
+                        (re-search-forward "^$")
+                        (let ((result (json-read)))
+                          ;; Write the response to the chatgpt-buffer
+                          (with-current-buffer chatgpt-buffer
+                            (princ (format "Request: %S\n" payload) chatgpt-buffer)
+                            (princ (format "Response: %S\n" result) chatgpt-buffer))
+                          (funcall callback result context cbargs)))
+                  (list chatgpt-buffer payload callback context cbargs))))
+
+(defun request-completion-at-point ()
+  "Asynchronously send the current node and main text of every node up to the top-level to ChatGPT for completion."
+  (interactive)
+  (let* ((context (leafy-get-context))
+         (placeholder (make-marker)))
+    (set-marker placeholder (point))
+    (leafy-insert-placeholder)
+    (leafy-do-chatgpt-request
+     chatgpt-buffer
+     context
+     (list placeholder (current-buffer))
+     (lambda (response context cbargs)
+       (pcase cbargs
+	 (`(,placeholder ,org-buffer)
+	  (with-current-buffer org-buffer
+	    (save-excursion
+	      (leafy-validate-chatgpt-response response)
+	      (leafy-tick-token-counters response)
+	      (let* ((statistics `((estimated-tokens . ,(apply #'+ (mapcar #'leafy-context-entry-tokens context)))))
+		     (insertion-point (marker-position placeholder)))
+		(leafy-update-placeholder placeholder "")
+		(goto-char insertion-point)
+		;; (message "@@@@@ placeholder:%S insertion-point:%S point:%S" placeholder insertion-point (point))
+		(leafy-insert-chatgpt-response-after "ChatGPT response" response statistics)
+		(set-marker placeholder nil))))))))))
+
+(defun leafy-insert-placeholder ()
+  "Insert a placeholder at the current position."
+  (insert "WAITING-ON-REQUEST"))
+
+(defun leafy-update-placeholder (placeholder response)
+  "Update the placeholder with the received response."
+  (save-excursion
+    (goto-char (marker-position placeholder))
+    (delete-region (point) (progn (forward-sexp 2) (point)))
+    (insert response)))
+
+(defun leafy-chatgpt-callback (status placeholder)
+  "Callback function for the ChatGPT API request."
+  (search-forward "\n\n")
+  (let ((response (buffer-substring (point) (point-max))))
+    (leafy-update-placeholder placeholder response)))
+
+(defun leafy-send-chatgpt-request (request-data)
+  "Send an asynchronous request to the ChatGPT API."
+  (let* ((url-request-method "POST")
+         (url-request-extra-headers '(("Content-Type" . "application/json")))
+         (url-request-data (json-encode request-data))
+         (api-url "https://api.openai.com/v1/engines/davinci-codex/completions") ; Replace with the correct API URL
+         (placeholder (make-marker)))
+    (leafy-insert-placeholder)
+    (set-marker placeholder (point))
+    (url-retrieve api-url #'leafy-chatgpt-callback (list placeholder))))
 
 (defun extract-chatgpt-response-message (response)
   (let* ((choices (cdr (assoc 'choices response)))
@@ -486,17 +587,6 @@ Messages are logged to the `chatgpt-buffer`."
     (while (setq node (org-up-heading-safe node))
       (push (cons 'heading (org-element-property :title node)) parents))
     parents))
-
-(defun request-completion-at-point ()
-  "Send the current node and main text of every node up to the top-level to ChatGPT for completion."
-  (interactive)
-  (let* ((context (leafy-get-context))
-	 (response (leafy-do-chatgpt-request chatgpt-buffer context))
-	 (statistics `((estimated-tokens . ,(apply #'+ (mapcar #'leafy-context-entry-tokens context)))))
-	 )
-    (leafy-validate-chatgpt-response response)
-    (leafy-tick-token-counters response)
-    (leafy-insert-chatgpt-response-after "ChatGPT response" response statistics)))
 
 ;; Define a function to search for a tag within an org-heading
 (defun heading-with-tag-p (tag)

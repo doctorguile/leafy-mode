@@ -1,7 +1,7 @@
 * Leafy Metadata
 :PROPERTIES:
 :drawer-name: meta
-:GPT3.5:   (("input-tokens" . 259813) ("output-tokens" . 41735) ("billed-tokens" . 301548))
+:GPT3.5:   (("input-tokens" . 264691) ("output-tokens" . 41891) ("billed-tokens" . 306582))
 :GPT4:     (("billed-tokens" . 4297) ("output-tokens" . 118) ("input-tokens" . 4179))
 :END:
 
@@ -38,9 +38,9 @@ This project involves using the ChatGPT model from OpenAI to assist with project
 ** projects
 *** TODO ChatGPT operator templates acting on code blocks
 *** TODO Recursive ChatGPT templates
-*** TODO Asynchronous Requests
 
 ** Done items :ignore:
+*** DONE Asynchronous Requests
 *** DONE Show the current selected model in the status bar, with a dropdown for changing it.
 *** DONE Allow selecting between different OpenAI models, while tracking the price, context length, etc.
 *** DONE Include current price of project in the status bar.
@@ -50,3 +50,12 @@ This project involves using the ChatGPT model from OpenAI to assist with project
 *** DONE Better way to count tokens than forking a separate Python process each time
 
 * Project
+** Testing
+** ChatGPT response                                               :assistant:
+:PROPERTIES:
+:input-tokens: 545
+:output-tokens: 24
+:billed-tokens: 569
+:estimated-tokens: 729
+:END:
+Do you need any specific help regarding testing? If you share more details, I'd be happy to assist you.
