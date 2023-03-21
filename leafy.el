@@ -7,6 +7,56 @@
 	    (define-key map (kbd "C-c t") 'leafy-test-insert-section-after)
 	    (define-key map (kbd "C-c c") 'leafy-log-context)
             map))
+
+(leafy-enable-mode-line)
+
+(defun leafy-mode-line ()
+  "Generate the Leafy mode-line string."
+  (let* ((current-model leafy-current-model) ;; Retrieve the current model here
+         (project-cost-alist (leafy-project-cost))
+	 (project-cost (alist-get 'total-cost project-cost-alist))
+	 )
+    (propertize
+     (format " Leafy: %s | Cost: $%.2f" current-model project-cost)
+     'local-map (let ((map (make-sparse-keymap)))
+                  (define-key map [mode-line mouse-1] 'leafy-select-model)
+                  map)
+     'mouse-face 'mode-line-highlight
+     'help-echo "mouse-1: Select model")))
+
+(defun leafy-select-model ()
+  "Display a list of available models in a dropdown menu and allow the user to select one."
+  (interactive)
+  (let* ((model-names (mapcar 'car leafy-model-info-alist))
+	 (menu-items (mapcar (lambda (model) (cons model model)) model-names))
+         (menu (list "Select a model" (cons "keymap" menu-items)))
+         (selected-model (x-popup-menu t menu)))
+    (when selected-model
+      (message "Selected model: %s" selected-model)
+      (leafy-set-current-model selected-model)
+      (force-mode-line-update)
+      )))
+
+(defun leafy-mode-line-exists-p ()
+  "Check if the Leafy mode-line display is already present."
+  (seq-find (lambda (x) (and (listp x) (eq (car x) :eval) (equal (cadr x) '(leafy-mode-line))))
+            mode-line-format))
+
+(defun leafy-enable-mode-line ()
+  "Enables the leafy-mode model-line that allows easily switching between models"
+  (interactive)
+  (unless (leafy-mode-line-exists-p)
+    (setq-default mode-line-format (cons '(:eval (leafy-mode-line)) mode-line-format)))
+  (force-mode-line-update))
+
+(defun leafy-remove-mode-line ()
+  "Remove the Leafy mode-line display from the current buffer."
+  (interactive)
+  (setq mode-line-format
+        (seq-remove (lambda (x) (and (listp x) (eq (car x) :eval) (equal (cadr x) '(leafy-mode-line))))
+                    mode-line-format))
+  (force-mode-line-update))
+
 (require 'org)
 (require 'org-element)
 (require 'leafy--utils)
@@ -56,6 +106,10 @@
 (defun leafy-get-model-info (model-name)
   "Get the model information alist for the given MODEL-NAME."
   (alist-get model-name leafy-model-info-alist nil nil #'equal))
+
+(defun leafy-model-openai-id (model-name)
+  "Get the OpenAI model id for the human-readable name MODEL-NAME"
+  (alist-get 'model-name (leafy-get-model-info model-name)))
 
 (defun leafy-model-context-size (model-name)
   "Get the context size for the given MODEL-NAME."
@@ -281,7 +335,8 @@ Messages are logged to the `chatgpt-buffer`."
   (let* ((messages (mapcar (lambda (node) `((role . ,(or (nth 0 node) "user"))
 					    (content . ,(nth 1 node))))
 			   nodes))
-         (payload `((model . "gpt-3.5-turbo-0301")
+	 (model-id (leafy-model-openai-id leafy-current-model))
+         (payload `((model . ,model-id)
                     (messages . ,messages)
                     (n . 1)
                     ;;(stop . [".", "!", "?"])
@@ -660,20 +715,10 @@ Returns the properties as an alist."
 :END:"
                3 5 15)))
 
-(defun leafy-print-costs ()
-  "Estimate how much $$$$ you've spent on the OpenAI so far"
-  (interactive)
-  (let* ((input-tokens (string-to-number (get-meta-property "input-tokens")))
-	 (billed-tokens (string-to-number (get-meta-property "billed-tokens")))
-	 (multiplier (/ 0.002 1000))
-	 )
-    (message "You have spent %s, %.0f%% of which was context" (* multiplier billed-tokens) (/ (* 100.0 input-tokens) billed-tokens))))
-
-(defun leafy-print-costs ()
-  "Estimate how much $$$$ you've spent on the OpenAI so far"
-  (interactive)
+(defun leafy-project-cost ()
   (let* ((total-cost 0)
          (total-input-tokens 0)
+	 (total-output-tokens 0)
          (total-billed-tokens 0))
     ;; Iterate over leafy-model-info-alist
     (dolist (model leafy-model-info-alist)
@@ -697,11 +742,29 @@ Returns the properties as an alist."
 	;; 	   (mbt . ,model-billed-tokens)))
         (setq total-cost (+ total-cost model-cost))
         (setq total-input-tokens (+ total-input-tokens model-input-tokens))
+	(setq total-output-tokens (+ total-output-tokens model-output-tokens))
         (setq total-billed-tokens (+ total-billed-tokens model-billed-tokens))
-	(unless (= 0 model-billed-tokens)
-          (message "Model %s has cost $%.2f" model-name model-cost))))
-    (message "Total cost: $%.2f, %.0f%% of which was context" total-cost (/ (* 100.0 total-input-tokens) total-billed-tokens))))
-(get-drawer-alist-property "meta" "GPT3.5" "input-tokens" 0)
+	;;(unless (= 0 model-billed-tokens)
+        ;;  (message "Model %s has cost $%.2f" model-name model-cost))
+	))
+    `((total-cost . ,total-cost)
+      (total-input-tokens . ,total-input-tokens)
+      (total-output-tokens . ,total-output-tokens)
+      (total-billed-tokens . ,total-billed-tokens))
+    ))
+    
+
+(defun leafy-print-costs ()
+  "Estimate how much $$$$ you've spent on the OpenAI so far"
+  (interactive)
+  (let* ((costs (leafy-project-cost))
+	 (total-cost (alist-get 'total-cost costs))
+	 (total-input-tokens (alist-get 'total-input-tokens costs))
+	 (total-output-tokens (alist-get 'total-output-tokens costs))
+	 (total-billed-tokens (alist-get 'total-billed-tokens costs))
+	 )
+    ;; TODO: This calculation is somewhat misleading, since some models bill different amounts for input/output. Maybe "% of cost spent on context" should be weighted.
+    (message "Total cost: $%.2f - %.0f%% of tokens were context" total-cost (/ (* 100.0 total-input-tokens) total-billed-tokens))))
 
 (cl-defun leafy-drop-one-section (sections)
   "Returns the index to remove of the last section that increases indentation."
