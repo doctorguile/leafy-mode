@@ -8,7 +8,23 @@
 	    (define-key map (kbd "C-c c") 'leafy-log-context)
             map))
 
-(leafy-enable-mode-line)
+(require 'org)
+(require 'org-element)
+(require 'leafy--utils)
+(require 'leafy--org-helpers)
+(require 'cl-lib)
+(require 'python)
+
+(defvar leafy-mode-hook nil  "Hook for enabling Leafy mode.")
+;; (defvar mode-line-format-leafy nil "Mode line format for leafy-mode.")
+(defvar leafy-record-token-statistics t "Whether to record token statistics in a meta property drawer")
+(defvar leafy-chatgpt-context-size 4096 "Context size tokens, including input and output")
+(defvar leafy-chatgpt-output-size-reservation 1024 "In a context which shares prompt and output, how many tokens to reserve for output?")
+(defvar leafy-priority-key "CONTEXT-PRIORITY" "Property name used to prioritize which sections are dropped first when context fills up")
+(defvar leafy-token-counting-method 'regex "One of '(exact regex) used to decide how to count tokens")
+(defvar leafy-chatgpt-context-buffer "*ChatGPT-Context*" "Name of the temporary buffer used by leafy-dump-context")
+(defvar leafy-current-model "GPT3.5" "Name of the model currently being used to make API requests")
+(defvar leafy-meta-drawer "meta" "Holds global statistics like token counts, etc.")
 
 (defun leafy-mode-line ()
   "Generate the Leafy mode-line string."
@@ -46,41 +62,22 @@
   "Enables the leafy-mode model-line that allows easily switching between models"
   (interactive)
   (unless (leafy-mode-line-exists-p)
-    (setq-default mode-line-format (cons '(:eval (leafy-mode-line)) mode-line-format)))
-  (force-mode-line-update))
+    (setq mode-line-format (append mode-line-format (list '(:eval (leafy-mode-line)))))
+    (force-mode-line-update)))
 
 (defun leafy-remove-mode-line ()
   "Remove the Leafy mode-line display from the current buffer."
   (interactive)
-  (setq mode-line-format
-        (seq-remove (lambda (x) (and (listp x) (eq (car x) :eval) (equal (cadr x) '(leafy-mode-line))))
-                    mode-line-format))
+  (setq mode-line-format (remove '(:eval (leafy-mode-line)) mode-line-format))
   (force-mode-line-update))
 
-(require 'org)
-(require 'org-element)
-(require 'leafy--utils)
-(require 'leafy--org-helpers)
 
 ;;(load-file (expand-file-name "./org-helpers.el"));; (file-name-directory buffer-file-name)))
 
-
-
-(require 'cl-lib)
-
 ;; Load the python.el library
-(require 'python)
 
 ;; Start a Python shell for leafy
 ;; (defvar leafy-python-shell (python-shell-get-or-create-process))
-(defvar leafy-record-token-statistics t)
-(defvar leafy-chatgpt-context-size 4096)
-(defvar leafy-chatgpt-output-size-reservation 1024)
-(defvar leafy-priority-key "CONTEXT-PRIORITY")
-(defvar leafy-token-counting-method 'regex) ;; '(exact regex)
-(defvar leafy-chatgpt-context-buffer "*ChatGPT-Context*")
-(defvar leafy-current-model "GPT3.5")
-(defvar leafy-meta-drawer "meta") ;; Holds global statistics like token counts, etc.
 
 (defun leafy-set-current-model (model-name)
   "Set the current model to MODEL-NAME."
@@ -342,7 +339,7 @@ Memoize the result and store the last 1000 command results."
 
     (leafy-validate-chatgpt-response response)
     (leafy-tick-token-counters response)
-    (leafy-insert-chatgpt-response-after "ChatGPT response" response statistics)))WAITING-ON-REQUEST
+    (leafy-insert-chatgpt-response-after "ChatGPT response" response statistics))))
   
 (defun leafy-do-chatgpt-request-synchronous (chatgpt-buffer nodes)
   "Send the given list of nodes to the OpenAI Chat API and return a list of completions.

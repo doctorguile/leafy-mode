@@ -1,7 +1,7 @@
 * Leafy Metadata
 :PROPERTIES:
 :drawer-name: meta
-:GPT3.5:   (("input-tokens" . 264691) ("output-tokens" . 41891) ("billed-tokens" . 306582))
+:GPT3.5:   (("input-tokens" . 283862) ("output-tokens" . 44339) ("billed-tokens" . 328201))
 :GPT4:     (("billed-tokens" . 4297) ("output-tokens" . 118) ("input-tokens" . 4179))
 :END:
 
@@ -40,6 +40,7 @@ This project involves using the ChatGPT model from OpenAI to assist with project
 *** TODO Recursive ChatGPT templates
 
 ** Done items :ignore:
+*** DONE Fix the modeline issue where the modeline was being set in every buffer.
 *** DONE Asynchronous Requests
 *** DONE Show the current selected model in the status bar, with a dropdown for changing it.
 *** DONE Allow selecting between different OpenAI models, while tracking the price, context length, etc.
@@ -50,12 +51,316 @@ This project involves using the ChatGPT model from OpenAI to assist with project
 *** DONE Better way to count tokens than forking a separate Python process each time
 
 * Project
-** Testing
+
+** Modeline issue
+:PROPERTIES:
+:input-tokens: 1920
+:output-tokens: 923
+:billed-tokens: 2843
+:estimated-tokens: 2707
+:END:
+
+Hello ChatGPT, I added a modeline for Leafy to display project cost and for the user to select which model to use from a dropdown. But my status bar modeline is activating even on buffers that are not leafy-mode. It seems to be a global update. Can you review the following code and give some advice?
+
+(define-minor-mode leafy-mode
+  "Leafy mode"
+  :init-value nil
+  :lighter " Leafy"
+  :keymap (let ((map (make-sparse-keymap)))
+            (define-key map (kbd "C-c C-c") 'request-completion-at-point)
+	    (define-key map (kbd "C-c t") 'leafy-test-insert-section-after)
+	    (define-key map (kbd "C-c c") 'leafy-log-context)
+            map))
+
+(leafy-enable-mode-line)
+
+(defun leafy-mode-line ()
+  "Generate the Leafy mode-line string."
+  (let* ((current-model leafy-current-model) ;; Retrieve the current model here
+         (project-cost-alist (leafy-project-cost))
+	 (project-cost (alist-get 'total-cost project-cost-alist))
+	 )
+    (propertize
+     (format " Leafy: %s | Cost: $%.2f" current-model project-cost)
+     'local-map (let ((map (make-sparse-keymap)))
+                  (define-key map [mode-line mouse-1] 'leafy-select-model)
+                  map)
+     'mouse-face 'mode-line-highlight
+     'help-echo "mouse-1: Select model")))
+
+(defun leafy-select-model ()
+  "Display a list of available models in a dropdown menu and allow the user to select one."
+  (interactive)
+  (let* ((model-names (mapcar 'car leafy-model-info-alist))
+	 (menu-items (mapcar (lambda (model) (cons model model)) model-names))
+         (menu (list "Select a model" (cons "keymap" menu-items)))
+         (selected-model (x-popup-menu t menu)))
+    (when selected-model
+      (message "Selected model: %s" selected-model)
+      (leafy-set-current-model selected-model)
+      (force-mode-line-update)
+      )))
+
+
+
+
+
+
+
+
+
+
+
+      
+(defun leafy-mode-line-exists-p ()
+  "Check if the Leafy mode-line display is already present."
+  (seq-find (lambda (x) (and (listp x) (eq (car x) :eval) (equal (cadr x) '(leafy-mode-line))))
+            mode-line-format))
+
+(defun leafy-enable-mode-line ()
+  "Enables the leafy-mode model-line that allows easily switching between models"
+  (interactive)
+  (unless (leafy-mode-line-exists-p)
+    (setq-default mode-line-format (cons '(:eval (leafy-mode-line)) mode-line-format)))
+  (force-mode-line-update))
+
+(defun leafy-remove-mode-line ()  :assistant:
+  "Remove the Leafy mode-line display from the current buffer."
+  (interactive)
+  (setq mode-line-format
+        (seq-remove (lambda (x) (and (listp x) (eq (car x) :eval) (equal (cadr x) '(leafy-mode-line))))
+                    mode-line-format))
+  (force-mode-line-update))
+  ** ChatGPT response
+The issue with your code is that `mode-line-format` is a global variable and any change to it will affect all buffers. Therefore, when you enable `leafy-mode` in one buffer, the `mode-line-format` variable gets updated to include the `leafy-mode-line`. This change then affects all buffers, which explains why the `leafy-mode-line` is appearing in all buffers. 
+
+One possible solution would be to use buffer-local or major-mode local variables for `mode-line-format` instead of a global variable. This would prevent changes to `mode-line-format` from affecting all buffers, and instead only apply to the buffer where `leafy-mode` is enabled. 
+
+You can create a variable like `mode-line-format-leafy` and make it buffer-local or major-mode local, then use it instead of `mode-line-format` in your `leafy-enable-mode-line` function. 
+
+You can also use `add-hook` to add the `leafy-enable-mode-line` function to the major-mode hook for Org mode, to ensure that the mode-line is only enabled in Org mode buffers. 
+
+Here's an example code snippet to illustrate this:
+
+```
+(defvar mode-line-format-leafy nil
+  "Mode line format for leafy-mode.")
+
+(define-minor-mode leafy-mode
+  "Leafy mode"
+  :init-value nil
+  :lighter " Leafy"
+  :keymap (let ((map (make-sparse-keymap)))
+            (define-key map (kbd "C-c C-c") 'request-completion-at-point)
+	    (define-key map (kbd "C-c t") 'leafy-test-insert-section-after)
+	    (define-key map (kbd "C-c c") 'leafy-log-context)
+            map))
+
+(defun leafy-mode-line ()
+  "Generate the Leafy mode-line string."
+  (let* ((current-model leafy-current-model) ;; Retrieve the current model here
+         (project-cost-alist (leafy-project-cost))
+	 (project-cost (alist-get 'total-cost project-cost-alist))
+	 )
+    (propertize
+     (format " Leafy: %s | Cost: $%.2f" current-model project-cost)
+     'local-map (let ((map (make-sparse-keymap)))
+                  (define-key map [mode-line mouse-1] 'leafy-select-model)
+                  map)
+     'mouse-face 'mode-line-highlight
+     'help-echo "mouse-1: Select model")))
+
+(defun leafy-select-model ()
+  "Display a list of available models in a dropdown menu and allow the user to select one."
+  (interactive)
+  (let* ((model-names (mapcar 'car leafy-model-info-alist))
+	 (menu-items (mapcar (lambda (model) (cons model model)) model-names))
+         (menu (list "Select a model" (cons "keymap" menu-items)))
+         (selected-model (x-popup-menu t menu)))
+    (when selected-model
+      (message "Selected model: %s" selected-model)
+      (leafy-set-current-model selected-model)
+      (force-mode-line-update))))
+
+(defun leafy-enable-mode-line ()
+  "Enables the leafy-mode model-line that allows easily switching between models"
+  (interactive)
+  (unless (leafy-mode-line-exists-p)
+    (setq-local mode-line-format-leafy (cons '(:eval (leafy-mode-line)) mode-line-format))
+    (force-mode-line-update)))
+
+(defun leafy-remove-mode-line ()
+  "Remove the Leafy mode-line display from the current buffer."
+  (interactive)
+  (setq-local mode-line-format-leafy (remove '(:eval (leafy-mode-line)) mode-line-format-leafy))
+  (force-mode-line-update))
+
+(defun leafy-enable-mode-line-in-org-mode ()
+  "Enables the Leafy mode-line in org mode buffers."
+  (when (eq major-mode 'org-mode)
+    (leafy-enable-mode-line)))
+
+(add-hook 'after-change-major-mode-hook #'leafy-enable-mode-line-in-org-mode)
+```
+
+In this example, `mode-line-format-leafy` is declared as a buffer-local variable using `setq-local` in the `leafy-enable-mode-line` function. The `after-change-major-mode-hook` is used to auto-enable the mode line in Org mode buffers by calling the `leafy-enable-mode-line-in-org-mode` function. Check to see if this code resolves your issue.
+
+** What if I want the hook to be attached to my minor-mode?
 ** ChatGPT response                                               :assistant:
 :PROPERTIES:
-:input-tokens: 545
-:output-tokens: 24
-:billed-tokens: 569
-:estimated-tokens: 729
+:input-tokens: 2187
+:output-tokens: 275
+:billed-tokens: 2462
+:estimated-tokens: 3066
 :END:
-Do you need any specific help regarding testing? If you share more details, I'd be happy to assist you.
+You can use the `leafy-mode-hook` variable to define a function that should be run when `leafy-mode` is enabled, then add that function to the hook list. Here's an example:
+
+```
+(defvar leafy-mode-hook nil
+  "Hook for enabling Leafy mode.")
+(add-hook 'leafy-mode-hook #'leafy-enable-mode-line)
+
+(defun leafy-enable-mode-line ()
+  "Enables the leafy-mode model-line that allows easily switching between models"
+  (unless (leafy-mode-line-exists-p)
+    (setq-local mode-line-format-leafy (cons '(:eval (leafy-mode-line)) mode-line-format))
+    (force-mode-line-update)))
+```
+
+In this example, the `leafy-mode-hook` variable is defined as an empty hook list. The `leafy-enable-mode-line` function is then added to the hook using the `add-hook` function. When `leafy-mode` is enabled, Emacs will run all functions in the `leafy-mode-hook` list, which in this case will only run the `leafy-enable-mode-line` function.
+
+By adding the hook to the `leafy-mode` minor mode instead of using `after-change-major-mode-hook`, this ensures that the hook only runs when `leafy-mode` is enabled, instead of for all major modes.
+
+** Do I have worry about running the add-hook twice? Such as during development?
+** ChatGPT response                                               :assistant:
+:PROPERTIES:
+:input-tokens: 2178
+:output-tokens: 184
+:billed-tokens: 2362
+:estimated-tokens: 3061
+:END:
+If you run `add-hook` multiple times with the same function, it will add the function to the hook list multiple times. This can cause the function to be run multiple times when the hook is triggered.
+
+To avoid this, you can use the `remove-hook` function to remove the hook before adding it again. For example, you could define a helper function like this:
+
+```
+(defun leafy-add-mode-line-hook ()
+  (remove-hook 'leafy-mode-hook #'leafy-enable-mode-line)
+  (add-hook 'leafy-mode-hook #'leafy-enable-mode-line))
+```
+
+This function removes the `leafy-enable-mode-line` function from the hook if it's already there, then adds it back. 
+
+You can call this function manually during development if you're worried about running `add-hook` multiple times. This will ensure that the hook only runs the function once at a time.
+
+** I guess I can also add the (add-hook) to my .emacs and not leave it in the main leafy.el. Does that sound good?
+** ChatGPT response                                               :assistant:
+:PROPERTIES:
+:input-tokens: 2305
+:output-tokens: 95
+:billed-tokens: 2400
+:estimated-tokens: 3301
+:END:
+Yes, you can definitely add the `add-hook` code to your `.emacs` file to ensure that the hook is always added when Emacs starts up. This will also help you avoid running `add-hook` multiple times during development. 
+
+Alternatively, you could define the hook and its functions in a separate file and load it with the `load-file` or `load-library` function in your `.emacs` file. This can help keep your code organized and modular.
+
+** Should leafy-mode-line-exists-p be updated? I noticed it checks the global mode-line-format variable.
+** ChatGPT response                                               :assistant:
+:PROPERTIES:
+:input-tokens: 2102
+:output-tokens: 209
+:billed-tokens: 2311
+:estimated-tokens: 2961
+:END:
+Yes, you should update `leafy-mode-line-exists-p` to check the `mode-line-format` buffer-local or major-mode local variable instead of the global `mode-line-format` variable.
+
+Here's an updated version of `leafy-mode-line-exists-p` that checks the buffer-local `mode-line-format-leafy` variable instead:
+
+```
+(defun leafy-mode-line-exists-p ()
+  "Check if the Leafy mode-line display is already present."
+  (let ((mode-line-format (buffer-local-value 'mode-line-format-leafy (current-buffer))))
+    (seq-find (lambda (x) (and (listp x) (eq (car x) :eval) (equal (cadr x) '(leafy-mode-line))))
+              mode-line-format)))
+```
+
+This will ensure that the function only checks for the `leafy-mode-line` in the buffer-local `mode-line-format-leafy` variable, which is specific to the buffer where `leafy-mode` is enabled.
+
+** How to reset my mode-line? After these changes, I think it's still corrupted from before.
+** ChatGPT response                                               :assistant:
+:PROPERTIES:
+:input-tokens: 2100
+:output-tokens: 200
+:billed-tokens: 2300
+:estimated-tokens: 2957
+:END:
+You can try resetting your mode-line by first removing all its elements using `setq`, and then re-adding your desired elements. Here's an example code snippet:
+
+```
+(setq-default mode-line-format nil)
+(setq-default mode-line-format
+      (list "%e"
+            " "
+            "%b "
+            '(:eval (when (buffer-modified-p) "(mod)"))
+            '(:eval (when buffer-read-only "(ro)"))
+            "Line: %l/%c "
+            "%p"
+            '(:eval (when vc-mode (concat " | " (vc-mode-line vc-mode)))))
+```
+
+This code removes all the elements from `mode-line-format` using `setq-default`, and then adds some basic elements back in, such as the buffer name, the modified/readonly status, the current line/column, and the percentage into the buffer. 
+
+You can modify this example code to add in your own elements as desired, such as your Leafy mode-line.
+
+** How is this buffer-local mode line replacement supposed to be used exactly? I don't see anything in my status bar, but I do see it's being set.
+** ChatGPT response                                               :assistant:
+:PROPERTIES:
+:input-tokens: 2113
+:output-tokens: 259
+:billed-tokens: 2372
+:estimated-tokens: 2980
+:END:
+This buffer-local mode line is supposed to be used alongside the `leafy-mode` minor-mode. When you enable `leafy-mode`, the `leafy-enable-mode-line` function is called which sets the `mode-line-format-leafy` variable as the buffer-local mode line format. If you don't see any changes in your status bar, it's possible that the `force-mode-line-update` function hasn't been called yet. 
+
+You can try calling `force-mode-line-update` manually to force the new mode line to be displayed. If that doesn't work, make sure you have defined the `leafy-mode-line` function correctly and that it returns the desired string.
+
+You can also add a conditional statement to `leafy-enable-mode-line-in-org-mode` function to only enable the mode line in buffers where `leafy-mode` is enabled:
+
+```
+(defun leafy-enable-mode-line-in-org-mode ()
+  "Enables the Leafy mode-line in org mode buffers where `leafy-mode' is enabled."
+  (when (eq major-mode 'org-mode)
+    (when leafy-mode
+      (leafy-enable-mode-line))))
+```
+
+This should prevent the mode line from being enabled in buffers where `leafy-mode` is not enabled.
+
+** How does (force-mode-line-update) know about the `mode-line-format-leafy` variable?
+** ChatGPT response                                               :assistant:
+:PROPERTIES:
+:input-tokens: 2101
+:output-tokens: 140
+:billed-tokens: 2241
+:estimated-tokens: 2957
+:END:
+`force-mode-line-update` is a command that updates the mode line for the current buffer. It looks for the current buffer's `mode-line-format` variable to update the display. In the example code, we set the `mode-line-format-leafy` to be buffer-local using `setq-local`, so when `force-mode-line-update` is called, it uses the buffer-local `mode-line-format-leafy` variable we created in `leafy-enable-mode-line`.
+
+By setting the `mode-line-format-leafy` variable with `setq-local`, we ensure that it is only used in the buffer where `leafy-mode` is enabled, and not in other buffers.
+
+
+** Let me rephrase: mode-line-format-leafy is correctly being set. How does `force-mode-line-update` know to use that variable when recomputing updates?
+I thought `mode-line-format` was a special variable, so it makes sense for `force-mode-line-update` to have a reference to it. But how does it get a reference to the new variable that we just defined in leafy.el?
+** ChatGPT response                                               :assistant:
+:PROPERTIES:
+:input-tokens: 2165
+:output-tokens: 163
+:billed-tokens: 2328
+:estimated-tokens: 3046
+:END:
+When you set `mode-line-format-leafy` using `setq-local` in `leafy-enable-mode-line`, it is set as a buffer-local variable specifically for the buffer where `leafy-mode` was enabled. The `force-mode-line-update` function knows to use the value of `mode-line-format` and its derivatives (such as `mode-line-format-leafy` in your case) because it updates the buffer's mode line based on the value of `mode-line-format` and its derivatives for that specific buffer. 
+
+So when you call `force-mode-line-update`, it updates the mode line for the current buffer by looking only at the value of `mode-line-format` and its derivatives that are set in that buffer (in your case, `mode-line-format-leafy`).
+
