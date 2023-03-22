@@ -4,7 +4,6 @@
   :lighter " Leafy"
   :keymap (let ((map (make-sparse-keymap)))
             (define-key map (kbd "C-c C-c") 'request-completion-at-point)
-	    (define-key map (kbd "C-c t") 'leafy-test-insert-section-after)
 	    (define-key map (kbd "C-c c") 'leafy-log-context)
             map))
 
