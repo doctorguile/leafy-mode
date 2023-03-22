@@ -33,13 +33,13 @@ This project involves using the ChatGPT model from OpenAI to assist with project
 
 ** misc
 *** TODO Timing information
-*** TODO Add a 5s timeout on the ChatGPT API request.
 
 ** projects
 *** TODO ChatGPT operator templates acting on code blocks
 *** TODO Recursive ChatGPT templates
 
 ** Done items :ignore:
+*** DONE Add a 5s timeout on the synchronous ChatGPT API request.
 *** DONE Fix the modeline issue where the modeline was being set in every buffer.
 *** DONE Asynchronous Requests
 *** DONE Show the current selected model in the status bar, with a dropdown for changing it.

@@ -361,7 +361,7 @@ Messages are logged to the `chatgpt-buffer`."
          (url-request-data (json-encode payload))
 	 )
     ;; Send the request to the OpenAI API
-    (with-current-buffer (url-retrieve-synchronously url t t)
+    (with-current-buffer (url-retrieve-synchronously url t t 5)
       ;; Parse the response and return the completions
       (goto-char (point-min))
       (re-search-forward "^$")
