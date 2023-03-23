@@ -23,13 +23,27 @@ Default keybindings are:
 
 ## Usage
 
-Write an org-mode document as usual, but you can invoke `request-completion-at-point` at any time to send your document to ChatGPT to request completion.
+Write an org-mode document as usual, but you can invoke `request-completion-at-point` at any time to send your document to ChatGPT to request completion. The first time you request a completion, a property drawer will be created that holds numbers like total token counts per model.
 
 If your context fills up, sibling and ancestor nodes are prioritized first and anything else dropped until it gets below the limit.
 
 `leafy-log-context` is used to make a temporary buffer with the context that would be sent to the API, for debugging or for easy pasting to the web UI.
 
 There is a status bar that looks like "Leafy: GPT3.5 | Cost: $0.79". It shows what model you're making API requests to, and how much you've spent so far. You can click the "GPT3.5" part to change the model. See `leafy-model-info-alist` if you want to add new models.
+
+You can add tags to your headlines:
+```
+* You are ProjectGPT - a project management assistant that can also code :system:
+** Some headline :ignore:
+* GPT chat
+** Introduction :user:
+Hello ChatGPT! We are working on an [...]
+** ChatGPT Response :assistant:
+```
+* :ignore: means the branch is always removed from context
+* :system: means the Chat Completions API receives that headline as a "system" role.
+* :assistant: specifies "assistant" role to the API
+* :user: is assumed by default, and specifies "user" role to the API.
 
 ## TODO items
 If you'd like to contribute, consider working on these:
