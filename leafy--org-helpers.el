@@ -478,3 +478,18 @@ aoeu
           (org-element-has-inherited-tag (org-element-property :parent element) tag)))))
 
 (provide 'leafy--org-helpers)
+
+(defun leafy-find-named-block (block-name)
+  (org-element-map (org-element-parse-buffer) 'src-block
+    (lambda (src-block)
+      (when (string= (org-element-property :name src-block) block-name)
+        src-block))
+    ;; Ensure search stops at the first matching block
+    nil t))
+
+(defun leafy-get-block-content (block)
+  (org-element-property :value block))
+
+(defun leafy-input-from-org-block (block-name)
+  (let ((block (leafy-find-named-block block-name)))
+    (when block (leafy-get-block-content block))))

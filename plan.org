@@ -1,8 +1,8 @@
 * Leafy Metadata
 :PROPERTIES:
 :drawer-name: meta
-:GPT3.5:   (("input-tokens" . 283862) ("output-tokens" . 44339) ("billed-tokens" . 328201))
-:GPT4:     (("billed-tokens" . 4297) ("output-tokens" . 118) ("input-tokens" . 4179))
+:GPT3.5:   (("elapsed-time" . 1.554657) ("num-invocations" . 1) ("input-tokens" . 285814) ("output-tokens" . 44367) ("billed-tokens" . 330181))
+:GPT4:     (("elapsed-time" . 54.952135) ("num-invocations" . 14) ("billed-tokens" . 86041) ("output-tokens" . 3405) ("input-tokens" . 82636))
 :END:
 
 * You are ProjectGPT - a coding project assistant tool. :system:
@@ -30,12 +30,13 @@ This project involves using the ChatGPT model from OpenAI to assist with project
 *** TODO Filter out later items at higher priority.
 *** TODO Filter out DONE items at higher priority.
 *** TODO Use OpenAI tiktoken to count tokens instead of a regex
+*** TODO "Local completions" using just a single code block or section.
 
 ** misc
 *** TODO Timing information
 
 ** projects
-*** TODO ChatGPT operator templates acting on code blocks
+*** TODO Operator templates
 *** TODO Recursive ChatGPT templates
 
 ** Done items :ignore:
@@ -52,315 +53,362 @@ This project involves using the ChatGPT model from OpenAI to assist with project
 
 * Project
 
-** Modeline issue
+Hi ChatGPT, we're working on a general-purpose "pipeline system" for letting ChatGPT read from files, fetch URLs, run shell commands, and more. You're going to get a big upgrade from this, so do your best and you'll be even better.
+
+** Project Plan
+
+*** Design the overall architecture for input sources, operators, and output destinations.
+*** Implement input source functions for files, URLs, minibuffer prompts, and org-mode code blocks.
+*** Implement operator functions for fetching URLs, asking for human input, running shell commands, breaking down projects, and other desired features.
+*** Implement output destination functions for files and org-mode code blocks.
+*** Implement the pipeline function to connect input sources, operators, and output destinations.
+*** Create a user interface for working with pipelines, starting with predefined Emacs Lisp functions and keybindings.
+*** Test the pipeline system and operators using the predefined functions.
+*** Integrate the pipeline system with org-mode for a more customizable and interactive experience.
+*** Implement more complex operators that handle multiple inputs or complex processing.
+*** Test and refine the pipeline system and operators to ensure proper functionality and performance.
+
+** Todos
+*** Design the overall architecture.
+*** Implement input source functions.
+*** Implement operator functions.
+*** Implement output destination functions.
+*** Implement the pipeline function.
+*** Create a user interface for working with pipelines.
+*** Test the pipeline system and operators.
+*** Integrate the pipeline system with org-mode.
+*** Implement more complex operators.
+*** Test and refine the pipeline system and operators.
+
+Here's some function signatures a variant of yourself outlined for me:
+
+```
+;; Input source functions
+(defun leafy-input-from-file (filename &optional chunk-size))
+(defun leafy-input-from-url (url))
+(defun leafy-input-from-minibuffer (prompt))
+(defun leafy-input-from-org-block (block))
+
+;; Operator functions
+(defun leafy-operator-fetch-url (input))
+(defun leafy-operator-ask-human (input))
+(defun leafy-operator-run-shell-command (input))
+(defun leafy-operator-break-down-project (input))
+(defun leafy-operator-summarize-chunks (chunks))
+
+;; Output destination functions
+(defun leafy-output-to-file (output filename))
+(defun leafy-output-to-org-block (output block))
+
+;; Pipeline function
+(defun leafy-pipeline (pipeline))
+
+;; Predefined pipelines and user interface
+(defun leafy-url-to-org-block-pipeline ())
+(defun leafy-interactive-pipeline ())
+(defun leafy-summarize-long-document-pipeline (filename &optional chunk-size output-fn output-args))
+```
+
+Example pipeline:
+```
+(setq my-pipeline
+      '(pipeline
+        (input (leafy-input-from-url "http://example.com"))
+        (operator (leafy-operator-fetch-url))
+        (output (leafy-output-to-org-block my-org-block))))
+
+;; Accessing the input function
+(cadr (assoc 'input my-pipeline))  ;; => (leafy-input-from-url "http://example.com")
+
+;; Accessing the input function's arguments
+(cddr (assoc 'input my-pipeline))  ;; => (("http://example.com"))
+
+;; Accessing the operator function
+(cadr (assoc 'operator my-pipeline))  ;; => (leafy-operator-fetch-url)
+
+;; Accessing the operator function's arguments
+(cddr (assoc 'operator my-pipeline))  ;; => (())
+
+;; Accessing the output function
+(cadr (assoc 'output my-pipeline))  ;; => (leafy-output-to-org-block my-org-block)
+
+;; Accessing the output function's arguments
+(cddr (assoc 'output my-pipeline))  ;; => ((my-org-block))
+
+;; More examples
+;; 1. Fetch and summarize a webpage
+'(pipeline
+  (input (leafy-input-from-url "https://example.com/some-article"))
+  (operator (leafy-operator-extract-main-content))
+  (operator (leafy-operator-summarize-text))
+  (output (leafy-output-to-org-block summary-block)))
+
+;; 2. Translate a file
+'(pipeline
+  (input (leafy-input-from-file "input.txt"))
+  (operator (leafy-operator-translate-text "en" "fr"))
+  (output (leafy-output-to-file "output-translated.txt")))
+
+;; 3. Fetch image URLs
+'(pipeline
+  (input (leafy-input-from-url "https://example.com/gallery"))
+  (operator (leafy-operator-extract-image-urls))
+  (output (leafy-output-to-org-block image-links-block)))
+
+;; 4. Analyze code and insert linting results: This pipeline reads code from an org-mode code block, runs a linter on the code, and inserts the linting results as comments in the org-mode buffer.
+'(pipeline
+  (input (leafy-input-from-org-block code-block))
+  (operator (leafy-operator-run-linter))
+  (output (leafy-output-to-org-block linting-results-block)))
+
+;; 5. Fetch and monitor RSS feed updates: This pipeline periodically fetches an RSS feed, compares the new items with the previously fetched items, and displays notifications for new items.
+'(pipeline
+  (input (leafy-input-from-url "https://example.com/rss-feed"))
+  (operator (leafy-operator-parse-rss))
+  (operator (leafy-operator-check-for-new-items))
+  (output (leafy-output-display-notifications)))
+
+;; 6. Repeatedly improve some code, asking ChatGPT to critique it.
+'(pipeline
+  (input (leafy-input-from-org-block code-block))
+  (operator (leafy-operator-improve-code-with-critic))
+  (operator (leafy-operator-iterate-until-stable
+             (lambda (code)
+               (let ((improved-code (leafy-operator-improve-code-with-critic code))
+                     (critic-score (leafy-operator-get-critic-score improved-code)))
+                 (and (equal code improved-code) (<= critic-score satisfaction-threshold))))
+             max-iterations))
+  (optional-operator (leafy-operator-run-interpreter) run-code-through-interpreter)
+  (operator (leafy-operator-paste-outputs-back-to-chatgpt))
+  (output (leafy-output-to-org-block final-code-block)))
+
+```
+
+Alright GPT-4. We have some code to write. The next project is going to allow invoking you in pipelines defined in emacs lisp. I have a rough outline of how it will work above. What should we start on?
+*** ChatGPT response                                              :assistant:
 :PROPERTIES:
-:input-tokens: 1920
-:output-tokens: 923
-:billed-tokens: 2843
-:estimated-tokens: 2707
+:input-tokens: 2901
+:output-tokens: 168
+:billed-tokens: 3069
+:estimated-tokens: 4346
 :END:
+First, let's start by implementing the input source functions, as they'll provide data for our pipeline system. Implement the following four functions, each returning input data from different sources:
 
-Hello ChatGPT, I added a modeline for Leafy to display project cost and for the user to select which model to use from a dropdown. But my status bar modeline is activating even on buffers that are not leafy-mode. It seems to be a global update. Can you review the following code and give some advice?
+1. `leafy-input-from-file`: Reads the contents of a file, optionally dividing it into chunks based on the provided `chunk-size` argument.
+2. `leafy-input-from-url`: Fetches a webpage from a URL, returning its content.
+3. `leafy-input-from-minibuffer`: Prompts the user for input using a minibuffer, returning the input as a string.
+4. `leafy-input-from-org-block`: Reads the content of a named org-mode code block, returning the content as a string.
 
-(define-minor-mode leafy-mode
-  "Leafy mode"
-  :init-value nil
-  :lighter " Leafy"
-  :keymap (let ((map (make-sparse-keymap)))
-            (define-key map (kbd "C-c C-c") 'request-completion-at-point)
-	    (define-key map (kbd "C-c t") 'leafy-test-insert-section-after)
-	    (define-key map (kbd "C-c c") 'leafy-log-context)
-            map))
+Once we have these input source functions, we can proceed to the operator functions that will process the data from input sources.
 
-(leafy-enable-mode-line)
+*** Good plan!
 
-(defun leafy-mode-line ()
-  "Generate the Leafy mode-line string."
-  (let* ((current-model leafy-current-model) ;; Retrieve the current model here
-         (project-cost-alist (leafy-project-cost))
-	 (project-cost (alist-get 'total-cost project-cost-alist))
-	 )
-    (propertize
-     (format " Leafy: %s | Cost: $%.2f" current-model project-cost)
-     'local-map (let ((map (make-sparse-keymap)))
-                  (define-key map [mode-line mouse-1] 'leafy-select-model)
-                  map)
-     'mouse-face 'mode-line-highlight
-     'help-echo "mouse-1: Select model")))
+Let's do `leafy-input-from-org-block` first. It'll be the easiest one for testing, and we can slot the other ones in at any time.
 
-(defun leafy-select-model ()
-  "Display a list of available models in a dropdown menu and allow the user to select one."
-  (interactive)
-  (let* ((model-names (mapcar 'car leafy-model-info-alist))
-	 (menu-items (mapcar (lambda (model) (cons model model)) model-names))
-         (menu (list "Select a model" (cons "keymap" menu-items)))
-         (selected-model (x-popup-menu t menu)))
-    (when selected-model
-      (message "Selected model: %s" selected-model)
-      (leafy-set-current-model selected-model)
-      (force-mode-line-update)
-      )))
+How do we tag and locate an org-mode block?
 
+(UPDATE) It has been implemented. NEXT please. I'm thinking about our first example operator.
 
+I notice I'm manually managing the context a lot. I'd prefer if ChatGPT had a "tool" available to query for what code blocks, section headers, etc. were available in the document context. Which implies that a registry of tools is needed, that ChatGPT be told that it can use them, that the results of those tools are made accessible in the context, that there be reasonable limits on the number of tools, etc.
 
+So instead of fixed pipelines like before, this seems much more valuable. Then I can just add tools for files, urls, memory, etc.
 
-
-
-
-
-
-
-
-      
-(defun leafy-mode-line-exists-p ()
-  "Check if the Leafy mode-line display is already present."
-  (seq-find (lambda (x) (and (listp x) (eq (car x) :eval) (equal (cadr x) '(leafy-mode-line))))
-            mode-line-format))
-
-(defun leafy-enable-mode-line ()
-  "Enables the leafy-mode model-line that allows easily switching between models"
-  (interactive)
-  (unless (leafy-mode-line-exists-p)
-    (setq-default mode-line-format (cons '(:eval (leafy-mode-line)) mode-line-format)))
-  (force-mode-line-update))
-
-(defun leafy-remove-mode-line ()  :assistant:
-  "Remove the Leafy mode-line display from the current buffer."
-  (interactive)
-  (setq mode-line-format
-        (seq-remove (lambda (x) (and (listp x) (eq (car x) :eval) (equal (cadr x) '(leafy-mode-line))))
-                    mode-line-format))
-  (force-mode-line-update))
-  ** ChatGPT response
-The issue with your code is that `mode-line-format` is a global variable and any change to it will affect all buffers. Therefore, when you enable `leafy-mode` in one buffer, the `mode-line-format` variable gets updated to include the `leafy-mode-line`. This change then affects all buffers, which explains why the `leafy-mode-line` is appearing in all buffers. 
-
-One possible solution would be to use buffer-local or major-mode local variables for `mode-line-format` instead of a global variable. This would prevent changes to `mode-line-format` from affecting all buffers, and instead only apply to the buffer where `leafy-mode` is enabled. 
-
-You can create a variable like `mode-line-format-leafy` and make it buffer-local or major-mode local, then use it instead of `mode-line-format` in your `leafy-enable-mode-line` function. 
-
-You can also use `add-hook` to add the `leafy-enable-mode-line` function to the major-mode hook for Org mode, to ensure that the mode-line is only enabled in Org mode buffers. 
-
-Here's an example code snippet to illustrate this:
-
-```
-(defvar mode-line-format-leafy nil
-  "Mode line format for leafy-mode.")
-
-(define-minor-mode leafy-mode
-  "Leafy mode"
-  :init-value nil
-  :lighter " Leafy"
-  :keymap (let ((map (make-sparse-keymap)))
-            (define-key map (kbd "C-c C-c") 'request-completion-at-point)
-	    (define-key map (kbd "C-c t") 'leafy-test-insert-section-after)
-	    (define-key map (kbd "C-c c") 'leafy-log-context)
-            map))
-
-(defun leafy-mode-line ()
-  "Generate the Leafy mode-line string."
-  (let* ((current-model leafy-current-model) ;; Retrieve the current model here
-         (project-cost-alist (leafy-project-cost))
-	 (project-cost (alist-get 'total-cost project-cost-alist))
-	 )
-    (propertize
-     (format " Leafy: %s | Cost: $%.2f" current-model project-cost)
-     'local-map (let ((map (make-sparse-keymap)))
-                  (define-key map [mode-line mouse-1] 'leafy-select-model)
-                  map)
-     'mouse-face 'mode-line-highlight
-     'help-echo "mouse-1: Select model")))
-
-(defun leafy-select-model ()
-  "Display a list of available models in a dropdown menu and allow the user to select one."
-  (interactive)
-  (let* ((model-names (mapcar 'car leafy-model-info-alist))
-	 (menu-items (mapcar (lambda (model) (cons model model)) model-names))
-         (menu (list "Select a model" (cons "keymap" menu-items)))
-         (selected-model (x-popup-menu t menu)))
-    (when selected-model
-      (message "Selected model: %s" selected-model)
-      (leafy-set-current-model selected-model)
-      (force-mode-line-update))))
-
-(defun leafy-enable-mode-line ()
-  "Enables the leafy-mode model-line that allows easily switching between models"
-  (interactive)
-  (unless (leafy-mode-line-exists-p)
-    (setq-local mode-line-format-leafy (cons '(:eval (leafy-mode-line)) mode-line-format))
-    (force-mode-line-update)))
-
-(defun leafy-remove-mode-line ()
-  "Remove the Leafy mode-line display from the current buffer."
-  (interactive)
-  (setq-local mode-line-format-leafy (remove '(:eval (leafy-mode-line)) mode-line-format-leafy))
-  (force-mode-line-update))
-
-(defun leafy-enable-mode-line-in-org-mode ()
-  "Enables the Leafy mode-line in org mode buffers."
-  (when (eq major-mode 'org-mode)
-    (leafy-enable-mode-line)))
-
-(add-hook 'after-change-major-mode-hook #'leafy-enable-mode-line-in-org-mode)
-```
-
-In this example, `mode-line-format-leafy` is declared as a buffer-local variable using `setq-local` in the `leafy-enable-mode-line` function. The `after-change-major-mode-hook` is used to auto-enable the mode line in Org mode buffers by calling the `leafy-enable-mode-line-in-org-mode` function. Check to see if this code resolves your issue.
-
-** What if I want the hook to be attached to my minor-mode?
-** ChatGPT response                                               :assistant:
+Can you plan out how ChatGPT-driven tools approach should work?
+*** ChatGPT response                                              :assistant:
 :PROPERTIES:
-:input-tokens: 2187
-:output-tokens: 275
-:billed-tokens: 2462
-:estimated-tokens: 3066
+:input-tokens: 4016
+:output-tokens: 500
+:billed-tokens: 4516
+:estimated-tokens: 6225
 :END:
-You can use the `leafy-mode-hook` variable to define a function that should be run when `leafy-mode` is enabled, then add that function to the hook list. Here's an example:
+I understand your desire to have a more flexible and modular system for managing context and tools. Here's a plan for building a ChatGPT-driven tools approach:
 
-```
-(defvar leafy-mode-hook nil
-  "Hook for enabling Leafy mode.")
-(add-hook 'leafy-mode-hook #'leafy-enable-mode-line)
+1. Create a `tools-registry` that will store a list of available tools along with their corresponding functions and descriptions.
 
-(defun leafy-enable-mode-line ()
-  "Enables the leafy-mode model-line that allows easily switching between models"
-  (unless (leafy-mode-line-exists-p)
-    (setq-local mode-line-format-leafy (cons '(:eval (leafy-mode-line)) mode-line-format))
-    (force-mode-line-update)))
-```
+2. Define a standardized structure for tool functions. Each tool function must accept a set of input parameters and return a single output value (possibly containing various sub-values).
 
-In this example, the `leafy-mode-hook` variable is defined as an empty hook list. The `leafy-enable-mode-line` function is then added to the hook using the `add-hook` function. When `leafy-mode` is enabled, Emacs will run all functions in the `leafy-mode-hook` list, which in this case will only run the `leafy-enable-mode-line` function.
+3. Implement a set of default tools such as:
+   - `tool-find-code-block`: Finds and returns org-mode code blocks along with their names.
+   - `tool-find-section-header`: Finds and returns org-mode section headers with their nesting levels.
+   - `tool-find-url`: Extracts URLs from a given text.
+   - Additional tools for reading files, fetching webpages, interacting with external memory stores, etc.
 
-By adding the hook to the `leafy-mode` minor mode instead of using `after-change-major-mode-hook`, this ensures that the hook only runs when `leafy-mode` is enabled, instead of for all major modes.
+4. Create a function for registering custom tools. This function should update the `tools-registry` with the details of the new tool.
 
-** Do I have worry about running the add-hook twice? Such as during development?
-** ChatGPT response                                               :assistant:
+5. Modify the ChatGPT interaction function to accept an optional `tools` parameter, which is a list of tool names that can be used during the conversation. When provided, ChatGPT should be informed of the available tools and their capabilities.
+
+6. Implement a mechanism in the ChatGPT interaction process to manage the selection and invocation of tools, keeping track of the resources used by each tool and imposing limits on their usage if necessary.
+
+7. Within the responses from ChatGPT, allow the model to suggest the usage of specific tools for particular tasks. Users can document these tool suggestions in their org-mode files, e.g.:
+   ```
+   * ChatGPT suggested tools
+   ** Find code blocks
+   :PROPERTIES:
+   :tool-function: tool-find-code-block
+   :END:
+
+   ** Extract URLs
+   :PROPERTIES:
+   :tool-function: tool-find-url
+   :END:
+   ```
+
+8. Implement a function for invoking a tool from ChatGPT, accepting the tool name and input parameters. This function should look up the tool in the `tools-registry`, execute it, and return the output to be incorporated into ChatGPT's context.
+
+With this approach, you can have a more dynamic and context-aware ChatGPT interaction while retaining control over the tools and their usage. The system will be more easily extensible, and you can add new tools as needed without having to change the core pipeline structure.
+
+*** Sounds good
+
+So I'm thinking the tools registry should be a global alist, that the document's metadata should specify the list of default allowed tools, that tools should insert a "system" message with a description like:
+
+("system", "You have the following tools available. Please invoke them using the syntax TOOL:(output-name = tool-name tool-args ...) and you will be invoked again with the outputs of these tools being bound to a variable output-name.")
+("system", "Memory tools: (tool-list-memories tool-read-memory tool-search-memory tool-create-memory)")
+("system", "Network tools: (tool-fetch-url tool-search-internet)")
+("system", "Code tools: (tool-evaluate-emacs-lisp)")
+("system", "Operator tools: (tool-ask-human-for-help tool-use-more-powerful-model)")
+("system", "Recursion tools: (tool-apply-recursion-template tool-invoke-agent tool-self-reflect tool-design-new-tool)")
+
+So each tool would define a list of functions, maybe each function would have a docstring that gets added too.
+
+Then, if ChatGPT wants to break down a project plan into smaller pieces. It could call "tool-apply-recursion-template" with some standard template like:
+
+1. Think about what to do next, given the set of tools available.
+2. Produce a set of tool invocations.
+3. Repeat until max thinking time is reached, or it thinks it knows the answer.
+4. Produce a final result output.
+
+How do you think we should implement this?
+*** ChatGPT response                                              :assistant:
 :PROPERTIES:
-:input-tokens: 2178
-:output-tokens: 184
-:billed-tokens: 2362
-:estimated-tokens: 3061
+:input-tokens: 3311
+:output-tokens: 735
+:billed-tokens: 4046
+:estimated-tokens: 5139
 :END:
-If you run `add-hook` multiple times with the same function, it will add the function to the hook list multiple times. This can cause the function to be run multiple times when the hook is triggered.
+To implement this, follow these steps:
 
-To avoid this, you can use the `remove-hook` function to remove the hook before adding it again. For example, you could define a helper function like this:
+Step 1: Initialize the global tools registry as an alist. It will store tool names as keys and their corresponding functions and descriptions as values.
 
-```
-(defun leafy-add-mode-line-hook ()
-  (remove-hook 'leafy-mode-hook #'leafy-enable-mode-line)
-  (add-hook 'leafy-mode-hook #'leafy-enable-mode-line))
+```elisp
+(defvar leafy-tools-registry nil)
 ```
 
-This function removes the `leafy-enable-mode-line` function from the hook if it's already there, then adds it back. 
+Step 2: Create a function to register a new tool. This function should take the tool name, tool function, and a description or docstring as parameters and update the global tools registry.
 
-You can call this function manually during development if you're worried about running `add-hook` multiple times. This will ensure that the hook only runs the function once at a time.
+```elisp
+(defun leafy-register-tool (tool-name tool-fn docstring)
+  (push (list tool-name tool-fn docstring) leafy-tools-registry))
+```
 
-** I guess I can also add the (add-hook) to my .emacs and not leave it in the main leafy.el. Does that sound good?
-** ChatGPT response                                               :assistant:
+Step 3: Register default tools in the tools registry using `leafy-register-tool`.
+
+```elisp
+(leafy-register-tool 'tool-list-memories 'my-list-memories-fn "List available memories.")
+(leafy-register-tool 'tool-read-memory 'my-read-memory-fn "Read a specific memory.")
+;; Register other default tools
+```
+
+Step 4: Modify the ChatGPT interaction function to accept a list of allowed tools from the document's metadata or another suitable source.
+
+```elisp
+(defun leafy-chatgpt-interact (allowed-tools)
+  ;; Include allowed-tools in the context, and proceed with the interaction process.
+  )
+```
+
+Step 5: Create a function to extract the tools requested by ChatGPT from the response. This function should match the syntax pattern for tools, e.g., "TOOL:(output-name = tool-name tool-args ...)".
+
+```elisp
+(defun leafy-extract-tools-from-response (response)
+  ;; Match and extract tool invocation patterns from the response.
+  )
+```
+
+Step 6: Implement the "tool-apply-recursion-template" function. It should follow the steps described in your question: think, produce tool invocations, repeat until the maximum thinking time is reached or the answer is found, and produce the final result output.
+
+```elisp
+(defun leafy-tool-apply-recursion-template (max-think-time)
+  ;; Keep track of the current think-time
+  (setq current-think-time 0)
+
+  ;; Repeat until either max think-time passed or an answer is found
+  (while (and (< current-think-time max-think-time)
+              (not answer-found))
+
+    ;; Step 1: Think about what to do next
+    (setq next-step (think-about-next-step))
+
+    ;; Step 2: Produce a set of tools invocations
+    (setq tool-invocations (produce-tool-invocations next-step))
+
+    ;; Step 3: Invoke selected tools and update context
+    (setq context (apply-tools-to-context tool-invocations context))
+
+    ;; Increase the current-thinking time
+    (setq current-think-time (1+ current-think-time)))
+
+  ;; Step 4: Produce a final result output
+  (produce-final-output))
+```
+
+Step 7: Execute the desired tool when ChatGPT suggests calling it in the response. Call the corresponding function from the global leafy-tools-registry and pass the results back to ChatGPT.
+
+```elisp
+(defun leafy-invoke-tool (tool-name tool-args)
+  (let* ((tool-info (assoc tool-name leafy-tools-registry))
+         (tool-fn (second tool-info)))
+    (apply tool-fn tool-args)))
+```
+
+With this implementation, you can manage and utilize the described tools with flexibility. You can easily register new tools or update existing ones, while maintaining control over which tools are accessible in ChatGPT interactions.
+
+*** What's a good tool to start with?
+
+Can you think of a few, and provide an implementation of one? Maainly I need it for testing.
+*** ChatGPT response                                              :assistant:
 :PROPERTIES:
-:input-tokens: 2305
-:output-tokens: 95
-:billed-tokens: 2400
-:estimated-tokens: 3301
+:input-tokens: 3839
+:output-tokens: 269
+:billed-tokens: 4108
+:estimated-tokens: 5945
 :END:
-Yes, you can definitely add the `add-hook` code to your `.emacs` file to ensure that the hook is always added when Emacs starts up. This will also help you avoid running `add-hook` multiple times during development. 
+Certainly, here are a few simple tools you can start with:
 
-Alternatively, you could define the hook and its functions in a separate file and load it with the `load-file` or `load-library` function in your `.emacs` file. This can help keep your code organized and modular.
+1. `tool-count-words`: Counts the number of words in a given string.
+2. `tool-count-lines`: Counts the number of lines in a given string.
+3. `tool-uppercase`: Converts a given string to uppercase.
+4. `tool-lowercase`: Converts a given string to lowercase.
 
-** Should leafy-mode-line-exists-p be updated? I noticed it checks the global mode-line-format variable.
-** ChatGPT response                                               :assistant:
+Let's implement the `tool-count-words` as an example for testing:
+
+```elisp
+(defun leafy-tool-count-words (input)
+  "Counts the number of words in the given string INPUT."
+  (length (split-string input "\\W+")))
+
+;; Register the tool
+(leafy-register-tool 'tool-count-words 'leafy-tool-count-words "Count the number of words in a string.")
+```
+
+Now you can test the tool by invoking it in your ChatGPT interactions. For example, you could ask ChatGPT to count the words in a string, and it could respond with:
+
+```
+TOOL:(word-count = tool-count-words "This is a sample string to count words.")
+```
+
+Then your code would execute the `leafy-invoke-tool` function to call `tool-count-words` with the provided input string, and the result will be incorporated into ChatGPT's context.
+
+*** Test
+
+This is a test of the ChatGPT system. You can say anything you like.
+*** ChatGPT response                                              :assistant:
 :PROPERTIES:
-:input-tokens: 2102
-:output-tokens: 209
-:billed-tokens: 2311
-:estimated-tokens: 2961
+:input-tokens: 1952
+:output-tokens: 28
+:billed-tokens: 1980
+:start-time: "2023-04-07 23:32:43"
+:elapsed-time: 1.554657
+:estimated-tokens: 2849
 :END:
-Yes, you should update `leafy-mode-line-exists-p` to check the `mode-line-format` buffer-local or major-mode local variable instead of the global `mode-line-format` variable.
-
-Here's an updated version of `leafy-mode-line-exists-p` that checks the buffer-local `mode-line-format-leafy` variable instead:
-
-```
-(defun leafy-mode-line-exists-p ()
-  "Check if the Leafy mode-line display is already present."
-  (let ((mode-line-format (buffer-local-value 'mode-line-format-leafy (current-buffer))))
-    (seq-find (lambda (x) (and (listp x) (eq (car x) :eval) (equal (cadr x) '(leafy-mode-line))))
-              mode-line-format)))
-```
-
-This will ensure that the function only checks for the `leafy-mode-line` in the buffer-local `mode-line-format-leafy` variable, which is specific to the buffer where `leafy-mode` is enabled.
-
-** How to reset my mode-line? After these changes, I think it's still corrupted from before.
-** ChatGPT response                                               :assistant:
-:PROPERTIES:
-:input-tokens: 2100
-:output-tokens: 200
-:billed-tokens: 2300
-:estimated-tokens: 2957
-:END:
-You can try resetting your mode-line by first removing all its elements using `setq`, and then re-adding your desired elements. Here's an example code snippet:
-
-```
-(setq-default mode-line-format nil)
-(setq-default mode-line-format
-      (list "%e"
-            " "
-            "%b "
-            '(:eval (when (buffer-modified-p) "(mod)"))
-            '(:eval (when buffer-read-only "(ro)"))
-            "Line: %l/%c "
-            "%p"
-            '(:eval (when vc-mode (concat " | " (vc-mode-line vc-mode)))))
-```
-
-This code removes all the elements from `mode-line-format` using `setq-default`, and then adds some basic elements back in, such as the buffer name, the modified/readonly status, the current line/column, and the percentage into the buffer. 
-
-You can modify this example code to add in your own elements as desired, such as your Leafy mode-line.
-
-** How is this buffer-local mode line replacement supposed to be used exactly? I don't see anything in my status bar, but I do see it's being set.
-** ChatGPT response                                               :assistant:
-:PROPERTIES:
-:input-tokens: 2113
-:output-tokens: 259
-:billed-tokens: 2372
-:estimated-tokens: 2980
-:END:
-This buffer-local mode line is supposed to be used alongside the `leafy-mode` minor-mode. When you enable `leafy-mode`, the `leafy-enable-mode-line` function is called which sets the `mode-line-format-leafy` variable as the buffer-local mode line format. If you don't see any changes in your status bar, it's possible that the `force-mode-line-update` function hasn't been called yet. 
-
-You can try calling `force-mode-line-update` manually to force the new mode line to be displayed. If that doesn't work, make sure you have defined the `leafy-mode-line` function correctly and that it returns the desired string.
-
-You can also add a conditional statement to `leafy-enable-mode-line-in-org-mode` function to only enable the mode line in buffers where `leafy-mode` is enabled:
-
-```
-(defun leafy-enable-mode-line-in-org-mode ()
-  "Enables the Leafy mode-line in org mode buffers where `leafy-mode' is enabled."
-  (when (eq major-mode 'org-mode)
-    (when leafy-mode
-      (leafy-enable-mode-line))))
-```
-
-This should prevent the mode line from being enabled in buffers where `leafy-mode` is not enabled.
-
-** How does (force-mode-line-update) know about the `mode-line-format-leafy` variable?
-** ChatGPT response                                               :assistant:
-:PROPERTIES:
-:input-tokens: 2101
-:output-tokens: 140
-:billed-tokens: 2241
-:estimated-tokens: 2957
-:END:
-`force-mode-line-update` is a command that updates the mode line for the current buffer. It looks for the current buffer's `mode-line-format` variable to update the display. In the example code, we set the `mode-line-format-leafy` to be buffer-local using `setq-local`, so when `force-mode-line-update` is called, it uses the buffer-local `mode-line-format-leafy` variable we created in `leafy-enable-mode-line`.
-
-By setting the `mode-line-format-leafy` variable with `setq-local`, we ensure that it is only used in the buffer where `leafy-mode` is enabled, and not in other buffers.
-
-
-** Let me rephrase: mode-line-format-leafy is correctly being set. How does `force-mode-line-update` know to use that variable when recomputing updates?
-I thought `mode-line-format` was a special variable, so it makes sense for `force-mode-line-update` to have a reference to it. But how does it get a reference to the new variable that we just defined in leafy.el?
-** ChatGPT response                                               :assistant:
-:PROPERTIES:
-:input-tokens: 2165
-:output-tokens: 163
-:billed-tokens: 2328
-:estimated-tokens: 3046
-:END:
-When you set `mode-line-format-leafy` using `setq-local` in `leafy-enable-mode-line`, it is set as a buffer-local variable specifically for the buffer where `leafy-mode` was enabled. The `force-mode-line-update` function knows to use the value of `mode-line-format` and its derivatives (such as `mode-line-format-leafy` in your case) because it updates the buffer's mode line based on the value of `mode-line-format` and its derivatives for that specific buffer. 
-
-So when you call `force-mode-line-update`, it updates the mode line for the current buffer by looking only at the value of `mode-line-format` and its derivatives that are set in that buffer (in your case, `mode-line-format-leafy`).
+Sure! I'm an AI language model created by OpenAI, designed to simulate a human-like conversation. How may I assist you today?
 

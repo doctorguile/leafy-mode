@@ -11,6 +11,7 @@
 (require 'org-element)
 (require 'leafy--utils)
 (require 'leafy--org-helpers)
+;;(require 'leafy--tools)
 (require 'cl-lib)
 (require 'python)
 
@@ -24,6 +25,7 @@
 (defvar leafy-chatgpt-context-buffer "*ChatGPT-Context*" "Name of the temporary buffer used by leafy-dump-context")
 (defvar leafy-current-model "GPT3.5" "Name of the model currently being used to make API requests")
 (defvar leafy-meta-drawer "meta" "Holds global statistics like token counts, etc.")
+(defvar leafy-timestamp-format "%F %T")
 
 (defun leafy-mode-line ()
   "Generate the Leafy mode-line string."
@@ -267,11 +269,14 @@ Memoize the result and store the last 1000 command results."
             (push (list level properties tag title (format "%s" content)) sections)))))
     (reverse sections)))
 
+(defun leafy-make-chatgpt-entry (tag message)
+  (list tag message))
+
 (defun leafy-section-to-chatgpt (section)
   "Returns a (tag, title + content) for a section"
   (pcase section
     (`(,_level ,_properties ,tag ,title ,content)
-     (list tag (leafy-join (list title content) "\n")))))
+     (leafy-make-chatgpt-entry tag (leafy-join (list title content) "\n")))))
 
 (defun leafy-sections-to-chatgpt (sections)
   "Returns a list of (tag, title + content) for a list of sections."
@@ -311,7 +316,7 @@ Memoize the result and store the last 1000 command results."
 	  (:billed-tokens . ,billed-tokens))))))
 
 ;; (tick-meta-counter "input-tokens" (alist-get :input-tokens '((:input-tokens . 2924) (:output-tokens . 28) (:billed-tokens . 2952))))
-(defun leafy-tick-token-counters (response)
+(defun leafy-tick-token-counters (response extras)
   (when leafy-record-token-statistics
     (let ((statistics (leafy-extract-chatgpt-usage-statistics response)))
       (unless (null statistics)
@@ -319,10 +324,13 @@ Memoize the result and store the last 1000 command results."
 	      (output-tokens (alist-get :output-tokens statistics))
 	      (billed-tokens (alist-get :billed-tokens statistics))
 	      (model-name leafy-current-model)
+	      (elapsed-time (float-time (alist-get :elapsed-time extras)))
 	      )
 	  (tick-meta-model-counter model-name "input-tokens" input-tokens)
 	  (tick-meta-model-counter model-name "output-tokens" output-tokens)
 	  (tick-meta-model-counter model-name "billed-tokens" billed-tokens)
+	  (tick-meta-model-counter model-name "num-invocations" 1)
+	  (tick-meta-model-counter model-name "elapsed-time" elapsed-time)
 	  )))))
 
 (defun request-completion-at-point-synchronous ()
@@ -333,12 +341,17 @@ Memoize the result and store the last 1000 command results."
 	 )
     (leafy-insert-placeholder)
     (let* ((response (leafy-do-chatgpt-request chatgpt-buffer context))
-	   (statistics `((estimated-tokens . ,(apply #'+ (mapcar #'leafy-context-entry-tokens context)))))
+	   (api-response (alist-get 'api-response response))
+	   (start-time (format-time-string leafy-timestamp-format (alist-get :start-time response)))
+	   (elapsed-time (float-time (alist-get :elapsed-time response)))
+	   (statistics `((estimated-tokens . ,(apply #'+ (mapcar #'leafy-context-entry-tokens context)))
+			 (:start-time . ,start-time)
+			 (:elapsed-time . ,elapsed-time)))
 	   )
-
-    (leafy-validate-chatgpt-response response)
-    (leafy-tick-token-counters response)
-    (leafy-insert-chatgpt-response-after "ChatGPT response" response statistics))))
+      
+      (leafy-validate-chatgpt-response api-response)
+      (leafy-tick-token-counters api-response statistics)
+      (leafy-insert-chatgpt-response-after "ChatGPT response" api-response statistics))))
   
 (defun leafy-do-chatgpt-request-synchronous (chatgpt-buffer nodes)
   "Send the given list of nodes to the OpenAI Chat API and return a list of completions.
@@ -368,7 +381,10 @@ Messages are logged to the `chatgpt-buffer`."
         ;; Write the response to the chatgpt-buffer	
 	(princ (format "Request: %S\n" payload) chatgpt-buffer)
 	(princ (format "Response: %S\n" result) chatgpt-buffer)
-	result))))
+	`((:api-response . ,result)
+	  (:start-time . ,start-time)
+	  (:elapsed-time . ,elapsed-time)
+	  )))))
 
 (defun leafy-do-chatgpt-request (chatgpt-buffer context cbargs callback)
   "Asynchronously send the given list of context nodes to the OpenAI Chat API and return a list of completions.
@@ -388,19 +404,24 @@ Messages are logged to the `chatgpt-buffer`. Calls `callback` with the API respo
          (url-request-method "POST")
          (url-request-extra-headers headers)
          (url-request-data (json-encode payload))
+	 (start-time (current-time))
          )
     ;; Send the request to the OpenAI API
-    (url-retrieve url (lambda (status chatgpt-buffer payload callback context cbargs)
+    (url-retrieve url (lambda (status chatgpt-buffer payload callback context cbargs start-time)
                         ;; Parse the response and return the completions
                         (goto-char (point-min))
                         (re-search-forward "^$")
-                        (let ((result (json-read)))
+                        (let* ((result (json-read))
+			       (elapsed-time (time-subtract (current-time) start-time))
+			       (extras `((:start-time . ,start-time)
+					 (:elapsed-time . ,elapsed-time)))
+			       )
                           ;; Write the response to the chatgpt-buffer
                           (with-current-buffer chatgpt-buffer
                             (princ (format "Request: %S\n" payload) chatgpt-buffer)
                             (princ (format "Response: %S\n" result) chatgpt-buffer))
-                          (funcall callback result context cbargs)))
-                  (list chatgpt-buffer payload callback context cbargs))))
+                          (funcall callback result context cbargs extras)))
+                  (list chatgpt-buffer payload callback context cbargs start-time))))
 
 (defun request-completion-at-point ()
   "Asynchronously send the current node and main text of every node up to the top-level to ChatGPT for completion."
@@ -413,15 +434,20 @@ Messages are logged to the `chatgpt-buffer`. Calls `callback` with the API respo
      chatgpt-buffer
      context
      (list placeholder (current-buffer))
-     (lambda (response context cbargs)
+     (lambda (response context cbargs extras)
        (pcase cbargs
 	 (`(,placeholder ,org-buffer)
 	  (with-current-buffer org-buffer
 	    (save-excursion
 	      (leafy-validate-chatgpt-response response)
-	      (leafy-tick-token-counters response)
-	      (let* ((statistics `((estimated-tokens . ,(apply #'+ (mapcar #'leafy-context-entry-tokens context)))))
-		     (insertion-point (marker-position placeholder)))
+	      (leafy-tick-token-counters response extras)
+	      (let* ((statistics `((estimated-tokens . ,(apply #'+ (mapcar #'leafy-context-entry-tokens context)))
+				   (:start-time . ,(format-time-string leafy-timestamp-format (alist-get :start-time extras)))
+				   (:elapsed-time . ,(float-time (alist-get :elapsed-time extras)))))
+		     (insertion-point (marker-position placeholder))
+		     )
+		(when (null insertion-point)
+		  (message "ERROR"))
 		(leafy-update-placeholder placeholder "")
 		(goto-char insertion-point)
 		;; (message "@@@@@ placeholder:%S insertion-point:%S point:%S" placeholder insertion-point (point))
@@ -550,6 +576,8 @@ Messages are logged to the `chatgpt-buffer`. Calls `callback` with the API respo
 	 (completion-tokens (alist-get 'completion_tokens usage))
 	 (billed-tokens (alist-get 'total_tokens usage))
 	 (estimated-tokens (and extra (alist-get 'estimated-tokens extra)))
+	 (start-time (and extra (alist-get :start-time extra)))
+	 (elapsed-time (and extra (alist-get :elapsed-time extra)))
 	)
     (org-insert-heading-after-current)
     (let ((new-heading (org-element-at-point)))
@@ -562,6 +590,8 @@ Messages are logged to the `chatgpt-buffer`. Calls `callback` with the API respo
 	  (org-set-property "input-tokens" (format "%S" prompt-tokens))
 	  (org-set-property "output-tokens" (format "%S" completion-tokens))
 	  (org-set-property "billed-tokens" (format "%S" billed-tokens))
+	  (when start-time (org-set-property "start-time" (format "%S" start-time)))
+	  (when elapsed-time (org-set-property "elapsed-time" (format "%S" elapsed-time)))
 	  (when estimated-tokens (org-set-property "estimated-tokens" (format "%d" estimated-tokens)))
 	  )))
     ;;(org-entry-put (point) "LEAFY_CONTEXT" nil)
