@@ -243,6 +243,45 @@ Memoize the result and store the last 1000 command results."
           (setq pos (1+ pos))))))
     count))
 
+(defun leafy-estimate-tokens-regex (string)
+  (let ((pos 0)
+        (count 0)
+        (str-len (length string))
+        (letter-group 0))
+    (while (< pos str-len)
+      (let ((char (aref string pos)))
+        (cond
+         ;; Rule 1: Every punctuation is a separate token.
+         ((string-match-p "[:punct:]" (char-to-string char))
+          (setq count (1+ count))
+          (setq pos (1+ pos))
+          (setq letter-group 0))
+         ;; Rule 2: Every 4 letters is a separate token.
+         ((string-match-p "[a-zA-Z]" (char-to-string char))
+          (setq letter-group (1+ letter-group))
+          (when (= letter-group 4)
+            (setq count (1+ count))
+            (setq letter-group 0))
+          (setq pos (1+ pos)))
+         ;; Rule 3: Whitespace is a token.
+         ((string-match-p "\\s-" (char-to-string char))
+          (setq count (1+ count))
+          (setq pos (1+ pos))
+          (setq letter-group 0))
+         ;; Rule 4: Every 2 numbers is a token.
+         ((string-match-p "[0-9]" (char-to-string char))
+          (setq count (1+ count))
+          (setq pos (+ pos 2))
+          (setq letter-group 0)
+          (when (> pos str-len)
+            (setq pos str-len)))
+         (t
+          (setq pos (1+ pos))
+          (setq letter-group 0)))))
+    (when (> letter-group 0)
+      (setq count (1+ count)))
+    count))
+
 (defun leafy-get-sections ()
   "Extracts each section in the buffer as a (level, property alist, tag, title, content) tuple."
   (let* ((sections '())
