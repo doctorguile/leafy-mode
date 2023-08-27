@@ -1,3 +1,5 @@
+(require 'ert)
+
 (define-minor-mode leafy-mode
   "Leafy mode"
   :init-value nil
@@ -14,6 +16,34 @@
 ;;(require 'leafy--tools)
 (require 'cl-lib)
 (require 'python)
+
+(defgroup leafy nil
+  "Customization group for the leaft package."
+  :prefix "leafy-"
+  :group 'applications)
+
+(defcustom leafy-api-service 'openai
+  "Service to use. Either 'openai or 'azure-openai."
+  :type '(choice (const :tag "OpenAI" openai)
+                 (const :tag "Azure-OpenAI" azure-openai))
+  :group 'leafy)
+
+
+(defcustom leafy-azure-openai-api-base "https://your-instance.openai.azure.com"
+  "Base API URL for Azure-OpenAI."
+  :type 'string
+  :group 'leafy)
+
+(defcustom leafy-azure-openai-deployment "azure-openai-deployment-name"
+  "Deployment name for Azure-OpenAI API."
+  :type 'string
+  :group 'leafy)
+
+(defcustom leafy-azure-openai-api-version "2023-07-01-preview"
+  "API version for Azure-OpenAI."
+  :type 'string
+  :group 'leafy)
+
 
 (defvar leafy-mode-hook nil  "Hook for enabling Leafy mode.")
 ;; (defvar mode-line-format-leafy nil "Mode line format for leafy-mode.")
@@ -391,7 +421,22 @@ Memoize the result and store the last 1000 command results."
       (leafy-validate-chatgpt-response api-response)
       (leafy-tick-token-counters api-response statistics)
       (leafy-insert-chatgpt-response-after "ChatGPT response" api-response statistics))))
-  
+
+(defun leafy--get-endpoint ()
+  "Determine the correct endpoint based on the service."
+  (cond
+   ((eq leafy-api-service 'azure-openai)
+    (format "%s/openai/deployments/%s/chat/completions?api-version=%s"
+            leafy-azure-openai-api-base leafy-azure-openai-deployment leafy-azure-openai-api-version))
+   (t "https://api.openai.com/v1/chat/completions")))
+
+(defun leafy--get-headers ()
+  "Determine the correct headers based on the service."
+  `(("Content-Type" . "application/json")
+    ,(cond
+      ((eq leafy-api-service 'azure-openai) `("api-key" . ,leafy-api-key))
+      (t `("Authorization" . ,(concat "Bearer " leafy-api-key))))))
+
 (defun leafy-do-chatgpt-request-synchronous (chatgpt-buffer nodes)
   "Send the given list of nodes to the OpenAI Chat API and return a list of completions.
 Messages are logged to the `chatgpt-buffer`."
@@ -399,17 +444,16 @@ Messages are logged to the `chatgpt-buffer`."
 					    (content . ,(nth 1 node))))
 			   nodes))
 	 (model-id (leafy-model-openai-id leafy-current-model))
-         (payload `((model . ,model-id)
-                    (messages . ,messages)
-                    (n . 1)
-                    ;;(stop . [".", "!", "?"])
-                    (max_tokens . ,leafy-chatgpt-output-size-reservation)))
-         (url "https://api.openai.com/v1/chat/completions")
-         (headers `(("Content-Type" . "application/json")
-                    ("Authorization" . ,(concat "Bearer " leafy-api-key))))
-         (url-request-method "POST")
-         (url-request-extra-headers headers)
-         (url-request-data (json-encode payload))
+	 (payload `((model . ,model-id)
+		    (messages . ,messages)
+		    (n . 1)
+		    ;;(stop . [".", "!", "?"])
+		    (max_tokens . ,leafy-chatgpt-output-size-reservation)))
+	 (url (leafy--get-endpoint))
+	 (headers (leafy--get-headers))
+	 (url-request-method "POST")
+	 (url-request-extra-headers headers)
+	 (url-request-data (json-encode payload))
 	 )
     ;; Send the request to the OpenAI API
     (with-current-buffer (url-retrieve-synchronously url t t 5)
@@ -437,9 +481,8 @@ Messages are logged to the `chatgpt-buffer`. Calls `callback` with the API respo
                     (n . 1)
                     ;;(stop . [".", "!", "?"])
                     (max_tokens . ,leafy-chatgpt-output-size-reservation)))
-         (url "https://api.openai.com/v1/chat/completions")
-         (headers `(("Content-Type" . "application/json")
-                    ("Authorization" . ,(concat "Bearer " leafy-api-key))))
+	 (url (leafy--get-endpoint))
+	 (headers (leafy--get-headers))
          (url-request-method "POST")
          (url-request-extra-headers headers)
          (url-request-data (json-encode payload))

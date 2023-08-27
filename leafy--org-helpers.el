@@ -1,4 +1,5 @@
 (require 'org)
+(require 'ert)
 
 (defun leafy-is-ancestor (ancestor descendant)
   "Check if ANCESTOR is an ancestor of DESCENDANT in the Org element tree."
